@@ -11,6 +11,15 @@ class RegisterRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $cccd = $this->input('cccd');
+
+        $this->merge([
+            'cccd_hash' => $cccd ? sha1($cccd) : null,
+        ]);
+    }
+
     public function rules(): array
     {
         return [
@@ -19,7 +28,8 @@ class RegisterRequest extends FormRequest
             'phone' => 'nullable|string|max:20|unique:users,phone',
             'password' => 'required|string|min:8',
             'apartment_code' => 'nullable|string|max:50',
-            'cccd' => 'nullable|string|size:12',
+            'cccd' => 'string|size:12',
+            'cccd_hash' => 'nullable|unique:users,cccd_hash'
         ];
     }
 }
