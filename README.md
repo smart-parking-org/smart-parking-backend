@@ -4,7 +4,24 @@
 
 ## 🚀 Bắt đầu
 
-_(Hướng dẫn chi tiết về cách cài đặt môi trường, khởi chạy các services và các câu lệnh cần thiết sẽ được cập nhật sớm.)_
+### Chạy service `svc-auth` với Laragon (Windows)
+
+```bash
+cd services/svc-auth
+
+copy .env.example .env
+php artisan key:generate
+
+# Nếu chỉ cần chạy nhanh, chưa cần DB:
+# sửa .env:
+#   SESSION_DRIVER=file
+#   CACHE_STORE=file
+#   QUEUE_CONNECTION=sync
+
+php artisan serve --host=127.0.0.1 --port=8001
+```
+
+_Mở trình duyệt: http://127.0.0.1:8001 → thấy trang Laravel mặc định ✅_
 
 ## 📁 Cấu trúc thư mục
 
