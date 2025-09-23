@@ -1,0 +1,24 @@
+# Dependencies
+/node_modules
+/vendor
+
+# Security - NEVER commit secret keys to a public repository!
+.env
+.env.*
+!.env.example
+
+# Laravel Generated Files
+.phpunit.result.cache
+storage/*.key
+storage/logs/*
+bootstrap/cache/*
+public/storage
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Docker
+*.pid
