@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Support\Str;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
+
 class AuthController extends Controller
 {
     public function register(RegisterRequest $request)
@@ -33,9 +34,9 @@ class AuthController extends Controller
     public function login(LoginRequest $request)
     {
         $credentials = $request->only('email', 'password');
-        $user = User::where('email', $credentials['email'])->first();
-
-        if (!$user) {
+        try {
+            $user = User::where('email', $credentials['email'])->firstOrFail();
+        } catch (\Throwable $th) {
             return response()->json(['message' => 'Invalid credentials'], 401);
         }
 

@@ -15,14 +15,12 @@ class EnsureAccessToken
             $typ = $payload->get('typ', 'access');
             if ($typ !== 'access') {
                 return response()->json([
-                    'error' => 'invalid_token_type',
-                    'message' => 'This endpoint requires an access token.',
+                    'message' => 'Unauthenticated',
                 ], 401);
             }
         } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'unauthenticated',
-                'message' => 'Authentication token is missing or invalid.',
+                'message' => 'Unauthenticated',
             ], 401);
         }
 
