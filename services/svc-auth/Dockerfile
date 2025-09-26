@@ -1,36 +1,47 @@
-# Sử dụng image PHP chính thức 8.2 với FPM (FastCGI Process Manager)
-# FPM giúp xử lý PHP nhanh hơn và thường dùng kèm với Nginx
+# ------------------------------
+# PHP-FPM 8.2 cho Laravel (Local Dev Fast)
+# ------------------------------
 FROM php:8.2-fpm
 
-# Cập nhật package và cài thêm các thư viện cần thiết cho Laravel
-# - git, unzip: phục vụ Composer khi tải gói
-# - libzip-dev: hỗ trợ extension zip
-# - libonig-dev: hỗ trợ regex (trước đây cần cho mbstring)
-# - libicu-dev: hỗ trợ extension intl (đa ngôn ngữ, i18n)
-# - libpng-dev: xử lý ảnh
-# Sau đó cài các extension PHP: pdo, pdo_mysql, intl, zip
+# 1) Hệ thống & PHP extensions cần cho Laravel
 RUN apt-get update && apt-get install -y \
-    git unzip libzip-dev libonig-dev libicu-dev libpng-dev \
-    && docker-php-ext-install pdo pdo_mysql intl zip
+    git unzip libzip-dev libicu-dev libpng-dev \
+ && docker-php-ext-install pdo pdo_mysql intl zip \
+ # phpredis để dùng REDIS_CLIENT=phpredis
+ && pecl install redis \
+ && docker-php-ext-enable redis \
+ # OPcache
+ && docker-php-ext-install opcache \
+ && rm -rf /var/lib/apt/lists/*
 
-# Copy binary Composer từ image composer:2 sang container
-# (khỏi cần cài đặt Composer thủ công)
+# 2) PHP config: OPcache + một số tối ưu dev
+RUN { \
+  echo 'opcache.enable=1'; \
+  echo 'opcache.enable_cli=0'; \
+  echo 'opcache.memory_consumption=256'; \
+  echo 'opcache.max_accelerated_files=20000'; \
+  echo 'opcache.validate_timestamps=1'; \
+  echo 'opcache.revalidate_freq=2'; \
+} > /usr/local/etc/php/conf.d/opcache.ini
+
+# 3) Composer CLI
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Đặt thư mục làm việc mặc định trong container là /var/www/html
+# 4) Thư mục làm việc trỏ vào code (sẽ bind-mount từ host)
 WORKDIR /var/www/html
 
-# Copy toàn bộ mã nguồn từ máy host vào container
+# Copy trước composer.* để tận dụng layer cache khi build
+COPY composer.json composer.lock ./
+# Nếu muốn nhanh nhất, build không có dev deps:
+# RUN composer install --no-interaction --prefer-dist --no-dev --optimize-autoloader
+# Nếu vẫn cần dev deps, dùng dòng dưới:
+RUN composer install --no-interaction --prefer-dist --optimize-autoloader --no-scripts
+
 COPY . .
 
-# Cài đặt các dependency Laravel (theo composer.json)
-# --no-interaction: không hỏi đáp
-# --prefer-dist: tải nhanh hơn bằng cách dùng bản phát hành thay vì clone git
-RUN composer install --no-interaction --prefer-dist
+# 5) Entrypoint: tự cài vendor nếu volume rỗng rồi chạy php-fpm
+# -> bạn không cần vào container chạy lệnh
+RUN php artisan package:discover --ansi || true \
+ && chown -R www-data:www-data storage bootstrap/cache
 
-# Laravel cần quyền ghi cho 2 thư mục: storage và bootstrap/cache
-# Gán quyền cho user www-data (người chạy PHP-FPM trong container)
-RUN chown -R www-data:www-data storage bootstrap/cache
-
-# Lệnh mặc định khi container chạy: khởi động PHP-FPM
 CMD ["php-fpm"]
