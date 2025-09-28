@@ -1,18 +1,43 @@
 services:
-  # -------------- Service Auth -------------- #
+  auth-composer:
+    image: composer:2
+    working_dir: /app
+    command: ["composer", "install", "--no-interaction", "--prefer-dist"]
+    volumes:
+      - ./services/svc-auth:/app
+      - vendor_auth:/app/vendor
+      - composer-cache:/tmp/cache
+    environment:
+      COMPOSER_CACHE_DIR: /tmp/cache
+    restart: "no"
+
   auth-app:
     build: ./services/svc-auth
     container_name: auth-app
     env_file: ./services/svc-auth/.env
+    working_dir: /var/www/html
     volumes:
       - ./services/svc-auth:/var/www/html:rw
-      # tách các thư mục nặng sang named volumes (Linux FS) -> nhanh hơn nhiều
-      - vendor:/var/www/html/vendor
-      - storage:/var/www/html/storage
-      - cache:/var/www/html/bootstrap/cache
+      - vendor_auth:/var/www/html/vendor
+      - storage_auth:/var/www/html/storage
+      - cache_auth:/var/www/html/bootstrap/cache
+    expose: ["9000"]
     depends_on:
-      - auth-db
-      - auth-redis
+      auth-composer:
+        condition: service_completed_successfully
+      auth-db:
+        condition: service_healthy
+      auth-redis:
+        condition: service_started
+    healthcheck:
+      test: >
+        [ -f vendor/autoload.php ] &&
+        php-fpm -tt >/dev/null 2>&1 &&
+        php -r 'exit(!@fsockopen("127.0.0.1",9000));'
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   auth-nginx:
     image: nginx:stable
@@ -23,7 +48,8 @@ services:
     ports:
       - "8001:80"
     depends_on:
-      - auth-app
+      auth-app:
+        condition: service_healthy
 
   auth-db:
     image: mysql:8
@@ -37,6 +63,12 @@ services:
       - "33061:3306"
     volumes:
       - auth-dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -proot || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
 
   auth-redis:
     image: redis:7
@@ -44,9 +76,9 @@ services:
     ports:
       - "6381:6379"
 
-# Volume để giữ dữ liệu MySQL
 volumes:
   auth-dbdata:
-  vendor:
-  storage:
-  cache:
+  vendor_auth:
+  storage_auth:
+  cache_auth:
+  composer-cache:
