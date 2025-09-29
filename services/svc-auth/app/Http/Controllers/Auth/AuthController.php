@@ -156,16 +156,18 @@ class AuthController extends Controller
         $user = auth('api')->user();
         $refreshToken = $this->createRefreshToken($user);
 
-        return response()->json([
+        return response()->json(array_merge(
             $this->respondWithToken($token, $refreshToken),
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'phone' => $user->phone,
-                'role' => $user->role,
-            ],
-        ]);
+            [
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'phone' => $user->phone,
+                    'role' => $user->role,
+                ]
+            ]
+        ));
     }
 
 
