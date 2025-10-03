@@ -1,4 +1,7 @@
 services:
+  # -------------------------
+  # Composer cho svc-auth
+  # -------------------------
   auth-composer:
     image: composer:2
     working_dir: /app
@@ -10,7 +13,11 @@ services:
     environment:
       COMPOSER_CACHE_DIR: /tmp/cache
     restart: "no"
+    networks: ["backend"]
 
+  # -------------------------
+  # PHP-FPM (svc-auth)
+  # -------------------------
   auth-app:
     build: ./services/svc-auth
     container_name: auth-app
@@ -38,7 +45,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    restart: unless-stopped
+    networks: ["backend"]
 
+  # -------------------------
+  # Nginx (svc-auth)
+  # -------------------------
   auth-nginx:
     image: nginx:stable
     container_name: auth-nginx
@@ -50,7 +62,22 @@ services:
     depends_on:
       auth-app:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "nginx -t && (echo > /dev/tcp/127.0.0.1/80) >/dev/null 2>&1 || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks: [backend]
 
+  # -------------------------
+  # MySQL (svc-auth)
+  # -------------------------
   auth-db:
     image: mysql:8
     container_name: auth-db
@@ -69,16 +96,34 @@ services:
       timeout: 3s
       retries: 30
       start_period: 30s
+    restart: unless-stopped
+    networks: [backend]
 
+  # -------------------------
+  # Redis
+  # -------------------------
   auth-redis:
     image: redis:7
-    container_name: auth-redis
+    container_name: redis
     ports:
       - "6381:6379"
+    restart: unless-stopped
+    networks: [backend]
 
+# -------------------------
+# Volumes
+# -------------------------
 volumes:
+  composer-cache:
+
   auth-dbdata:
   vendor_auth:
   storage_auth:
   cache_auth:
-  composer-cache:
+
+# -------------------------
+# Network
+# -------------------------
+networks:
+  backend:
+    driver: bridge

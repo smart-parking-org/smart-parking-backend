@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Enums\AccountStatus;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -22,7 +23,7 @@ class UserSeeder extends Seeder
             'cccd_masked' => '999******999',
             'role' => 'admin',
             'is_active' => true,
-            'is_approved' => true,
+            'status' => AccountStatus::APPROVED
         ]);
     }
 }

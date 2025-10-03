@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Enums\AccountStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Requests\Auth\RegisterRequest;
 use App\Models\User;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
@@ -22,8 +24,8 @@ class AuthController extends Controller
      *     @OA\JsonContent(
      *       required={"name","email","password"},
      *       @OA\Property(property="name", type="string", example="Nguyen Van A"),
-     *       @OA\Property(property="email", type="string", format="email", example="a@example.com"),
-     *       @OA\Property(property="password", type="string", format="password", minLength=8, example="P@ssw0rd!"),
+     *       @OA\Property(property="email", type="string", format="email", example="user@example.com"),
+     *       @OA\Property(property="password", type="string", format="password", minLength=8, example="12345678"),
      *       @OA\Property(property="phone", type="string", nullable=true, example="0912345678"),
      *       @OA\Property(property="apartment_code", type="string", nullable=true, example="B2-12A"),
      *       @OA\Property(property="cccd", type="string", nullable=true, example="079123456789")
@@ -65,25 +67,79 @@ class AuthController extends Controller
      */
     public function register(RegisterRequest $request)
     {
+        $data = $request->validated();
+        $existUser = User::withTrashed()->where('email', $data['email'])->first();
+
+        if ($existUser) {
+            if ($existUser->trashed()) {
+                // RESTORE người từng bị reject+delete
+                $existUser->restore();
+                $existUser->update([
+                    'name' => $data['name'],
+                    'phone' => $data['phone'] ?? null,
+                    'apartment_code' => $data['apartment_code'] ?? null,
+                    'cccd_hash' => $data['cccd_hash'],
+                    'cccd_masked' => $data['cccd_masked'],
+                    'password' => Hash::make($data['password']),
+                    'status' => 'pending',
+                    'is_active' => true,
+                    'approved_by' => null,
+                    'approved_at' => null,
+                    'rejected_reason' => null,
+                ]);
+
+                return response()->json([
+                    'message' => 'Account restored. Please wait for review.',
+                    'user' => [
+                        'id' => $existUser->id,
+                        'name' => $existUser->name,
+                        'email' => $existUser->email,
+                        'phone' => $existUser->phone,
+                        'role' => $existUser->role,
+                        'status' => $existUser->status,
+                    ]
+                ], 200);
+            }
+
+            // Nếu chưa bị xoá: chặn theo trạng thái hiện tại
+            if ($existUser->status === AccountStatus::APPROVED) {
+                return response()->json(['message' => 'Email already registered'], 422);
+            }
+
+            if ($existUser->status === AccountStatus::PENDING) {
+                return response()->json(['message' => 'Your account is pending review'], 400);
+            }
+
+            if ($existUser->status === AccountStatus::REJECTED) {
+                // Trường hợp admin reject nhưng quên delete (phòng hờ)
+                return response()->json(['message' => 'Account was rejected. Please contact support.'], 400);
+            }
+        }
+
+        // Đăng ký mới
         $user = User::create([
-            'name' => $request->input('name'),
-            'email' => $request->input('email'),
-            'phone' => $request->input('phone'),
-            'password' => $request->input('password'),
-            'apartment_code' => $request->input('apartment_code'),
-            'cccd_hash' => $request->input('cccd') ? sha1($request->input('cccd')) : null,
-            'cccd_masked' => $request->input('cccd') ? substr($request->input('cccd'), 0, 3) . '******' . substr($request->input('cccd'), -3) : null,
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'phone' => $data['phone'] ?? null,
+            'apartment_code' => $data['apartment_code'] ?? null,
+            'cccd_hash' => $data['cccd_hash'],
+            'cccd_masked' => $data['cccd_masked'],
+            'password' => Hash::make($data['password']),
+            'role' => 'resident',
+            'status' => AccountStatus::PENDING,
+            'is_active' => true,
         ]);
         $user->refresh();
 
         return response()->json([
-            'message' => 'Registered successfully',
+            'message' => 'Registered. Please wait for review.',
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
                 'phone' => $user->phone,
                 'role' => $user->role,
+                'status' => AccountStatus::PENDING
             ],
         ], 201);
     }
@@ -133,22 +189,34 @@ class AuthController extends Controller
     public function login(LoginRequest $request)
     {
         $credentials = $request->only('email', 'password');
-        try {
-            $user = User::where('email', $credentials['email'])->firstOrFail();
-        } catch (\Throwable $th) {
+
+        $user = User::withTrashed()
+            ->where('email', $credentials['email'])
+            ->first();
+
+        // Email không tồn tại
+        if (!$user) {
             return response()->json(['message' => 'Invalid credentials'], 401);
         }
 
-        // Check trạng thái active
+        // Đã bị reject + soft delete
+        if ($user->trashed()) {
+            return response()->json([
+                'message' => 'Your account was rejected and archived. Please register again.'
+            ], 403);
+        }
+
+        // Bị khóa hoạt động
         if (!$user->is_active) {
             return response()->json(['message' => 'Your account has been deactivated'], 403);
         }
 
-        // Check đã được admin duyệt chưa
-        if (!$user->is_approved) {
+        // Chờ duyệt
+        if ($user->status === AccountStatus::PENDING) {
             return response()->json(['message' => 'Your account is pending approval'], 403);
         }
 
+        // Xác thực mật khẩu / cấp access token
         if (!$token = auth('api')->claims(['typ' => 'access'])->attempt($credentials)) {
             return response()->json(['message' => 'Invalid credentials'], 401);
         }

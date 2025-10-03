@@ -5,6 +5,8 @@ RUN apt-get update && apt-get install -y \
  && docker-php-ext-install pdo pdo_mysql intl zip \
  && rm -rf /var/lib/apt/lists/*
 
+RUN pecl install redis && docker-php-ext-enable redis
+
 RUN { \
   echo 'opcache.enable=1'; \
   echo 'opcache.enable_cli=0'; \

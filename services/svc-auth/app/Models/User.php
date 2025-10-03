@@ -3,15 +3,17 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\AccountStatus;
 use App\Enums\UserRole;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use PHPOpenSourceSaver\JWTAuth\Contracts\JWTSubject;
 
 class User extends Authenticatable implements JWTSubject
 {
-    use HasFactory, Notifiable;
+    use HasFactory, Notifiable, SoftDeletes;
 
     protected $fillable = [
         'name',
@@ -21,6 +23,11 @@ class User extends Authenticatable implements JWTSubject
         'cccd_hash',
         'cccd_masked',
         'password',
+        'status',
+        'approved_by',
+        'is_active',
+        'approved_at',
+        'rejected_reason'
     ];
 
     protected $hidden = [
@@ -35,8 +42,8 @@ class User extends Authenticatable implements JWTSubject
             'phone_verified_at' => 'datetime',
             'approved_at' => 'datetime',
             'is_active' => 'boolean',
-            'is_approved' => 'boolean',
             'password' => 'hashed',
+            'status' => AccountStatus::class,
             'role' => UserRole::class
         ];
     }
