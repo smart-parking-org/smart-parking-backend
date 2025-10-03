@@ -1,0 +1,59 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Smart Parking - Payment Service API",
+        "description": "OpenAPI docs cho svc-payment",
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "http://localhost:8002/api",
+            "description": "Local API through svc-auth"
+        }
+    ],
+    "paths": {
+        "/payment/ping": {
+            "get": {
+                "tags": [
+                    "Sample"
+                ],
+                "summary": "Ping",
+                "description": "Ping healthcheck",
+                "operationId": "9356c1194f66f2fc255b60870f1e17a2",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "pong"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "bearerFormat": "JWT",
+                "scheme": "bearer"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Sample",
+            "description": "Sample"
+        }
+    ]
+}

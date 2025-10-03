@@ -29,12 +29,13 @@ services:
       - storage_auth:/var/www/html/storage
       - cache_auth:/var/www/html/bootstrap/cache
     expose: ["9000"]
+    # entrypoint: ["/usr/local/bin/entrypoint.sh"]
     depends_on:
       auth-composer:
         condition: service_completed_successfully
       auth-db:
         condition: service_healthy
-      auth-redis:
+      redis:
         condition: service_started
     healthcheck:
       test: >
@@ -100,9 +101,110 @@ services:
     networks: [backend]
 
   # -------------------------
+  # Composer cho svc-payment
+  # -------------------------
+  payment-composer:
+    image: composer:2
+    working_dir: /app
+    command: ["composer", "install", "--no-interaction", "--prefer-dist"]
+    volumes:
+      - ./services/svc-payment:/app
+      - vendor_payment:/app/vendor
+      - composer-cache:/tmp/cache
+    environment:
+      COMPOSER_CACHE_DIR: /tmp/cache
+    restart: "no"
+    networks: ["backend"]
+
+  # -------------------------
+  # PHP-FPM (svc-payment)
+  # -------------------------
+  payment-app:
+    build: ./services/svc-payment
+    container_name: payment-app
+    env_file: ./services/svc-payment/.env
+    working_dir: /var/www/html
+    volumes:
+      - ./services/svc-payment:/var/www/html:rw
+      - vendor_payment:/var/www/html/vendor
+      - storage_payment:/var/www/html/storage
+      - cache_payment:/var/www/html/bootstrap/cache
+    expose: ["9000"]
+    # entrypoint: ["/usr/local/bin/entrypoint.sh"]
+    depends_on:
+      payment-composer:
+        condition: service_completed_successfully
+      payment-db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: >
+        [ -f vendor/autoload.php ] &&
+        php-fpm -tt >/dev/null 2>&1 &&
+        php -r 'exit(!@fsockopen("127.0.0.1",9000));'
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks: ["backend"]
+
+  # -------------------------
+  # Nginx (svc-payment)
+  # -------------------------
+  payment-nginx:
+    image: nginx:stable
+    container_name: payment-nginx
+    volumes:
+      - ./services/svc-payment:/var/www/html:ro
+      - ./services/svc-payment/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8002:80"
+    depends_on:
+      payment-app:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "nginx -t && (echo > /dev/tcp/127.0.0.1/80) >/dev/null 2>&1 || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks: [backend]
+
+  # -------------------------
+  # MySQL (svc-auth)
+  # -------------------------
+  payment-db:
+    image: mysql:8
+    container_name: payment-db
+    environment:
+      MYSQL_DATABASE: payment_db
+      MYSQL_USER: payment
+      MYSQL_PASSWORD: payment
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "33062:3306"
+    volumes:
+      - payment-dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -proot || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+    networks: [backend]
+
+  # -------------------------
   # Redis
   # -------------------------
-  auth-redis:
+  redis:
     image: redis:7
     container_name: redis
     ports:
@@ -120,6 +222,11 @@ volumes:
   vendor_auth:
   storage_auth:
   cache_auth:
+
+  payment-dbdata:
+  vendor_payment:
+  storage_payment:
+  cache_payment:
 
 # -------------------------
 # Network
