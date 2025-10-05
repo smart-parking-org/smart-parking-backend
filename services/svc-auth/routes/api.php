@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\UserApprovalController;
+use App\Http\Controllers\VehicleTypeController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -19,3 +20,5 @@ Route::prefix('admin')->middleware(['auth:api', 'ensure.access', 'ensure.admin']
     Route::patch('/users/{id}/approve', [UserApprovalController::class, 'approve']);
     Route::patch('/users/{id}/reject', [UserApprovalController::class, 'reject']);
 });
+
+Route::apiResource('vehicle-types', VehicleTypeController::class);
