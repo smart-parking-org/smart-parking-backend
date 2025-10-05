@@ -15,7 +15,7 @@ class UserApprovalController extends Controller
      *   tags={"Admin"},
      *   security={{"bearerAuth":{}}},
      *   @OA\Parameter(
-     *     name="user", in="path", required=true, description="User ID",
+     *     name="id", in="path", required=true, description="User ID",
      *     @OA\Schema(type="integer", example=123)
      *   ),
      *   @OA\Response(
