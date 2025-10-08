@@ -14,7 +14,7 @@ return new class extends Migration {
             $table->id();
 
             $table->string('name', 100); // Xe máy, Ô tô 4 chỗ, Ô tô 7 chỗ, Xe tải nhẹ
-            $table->string('code', 20)->unique(); // MOTORBIKE, CAR_4, CAR_7, TRUCK
+            $table->string('code', 20)->unique(); // truck, car_4, car_7, truck
             $table->string('description')->nullable();
             $table->boolean('is_active')->default(true);
 
