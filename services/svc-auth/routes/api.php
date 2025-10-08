@@ -16,9 +16,20 @@ Route::prefix('auth')->group(function () {
     });
 });
 
-Route::prefix('admin')->middleware(['auth:api', 'ensure.access', 'ensure.admin'])->group(function () {
-    Route::patch('/users/{id}/approve', [UserApprovalController::class, 'approve']);
-    Route::patch('/users/{id}/reject', [UserApprovalController::class, 'reject']);
+Route::middleware(['auth:api', 'ensure.access', 'ensure.admin'])->group(function () {
+    // Vehicle types
+    Route::apiResource('vehicle-types', VehicleTypeController::class)->only(['store', 'update', 'destroy']);
+
+    Route::prefix('admin')->group(function () {
+        Route::patch('/users/{id}/approve', [UserApprovalController::class, 'approve']);
+        Route::patch('/users/{id}/reject', [UserApprovalController::class, 'reject']);
+
+        // Vehicle types
+        Route::post('/vehicle-types/{id}/activate', [VehicleTypeController::class, 'activate']);
+        Route::post('/vehicle-types/{id}/deactivate', [VehicleTypeController::class, 'deactivate']);
+    });
 });
 
-Route::apiResource('vehicle-types', VehicleTypeController::class);
+// Vehicle types
+Route::apiResource('vehicle-types', VehicleTypeController::class)
+    ->only(['index', 'show']);

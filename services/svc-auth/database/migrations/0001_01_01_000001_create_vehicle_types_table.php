@@ -13,17 +13,12 @@ return new class extends Migration {
         Schema::create('vehicle_types', function (Blueprint $table) {
             $table->id();
 
-            $table->string('type_name', 100);
+            $table->string('name', 100); // Xe máy, Ô tô 4 chỗ, Ô tô 7 chỗ, Xe tải nhẹ
+            $table->string('code', 20)->unique(); // MOTORBIKE, CAR_4, CAR_7, TRUCK
             $table->string('description')->nullable();
-            $table->decimal('hourly_rate', 10, 2);
-            $table->decimal('daily_rate', 10, 2);
-            $table->decimal('monthly_rate', 10, 2);
             $table->boolean('is_active')->default(true);
 
             $table->timestamps();
-            $table->softDeletes();
-
-            $table->index('type_name');
         });
     }
 

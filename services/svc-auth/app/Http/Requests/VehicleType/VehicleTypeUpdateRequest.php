@@ -6,7 +6,7 @@ use App\Models\VehicleType;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class UpdateVehicleTypeRequest extends FormRequest
+class VehicleTypeUpdateRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -23,20 +23,20 @@ class UpdateVehicleTypeRequest extends FormRequest
      */
     public function rules(): array
     {
-        $id = $this->route('vehicle_type')?->id ?? $this->route('vehicle_type');
+        $id = $this->route('vehicle_type');
 
         return [
-            'type_name' => [
+            'name' => ['sometimes', 'required', 'string', 'max:100'],
+            'code' => [
                 'sometimes',
                 'required',
                 'string',
-                'max:100',
-                Rule::unique('vehicle_types', 'type_name')->ignore($id)->whereNull('deleted_at')
+                'max:20',
+                'regex:/^[A-Z0-9_]+$/',
+                Rule::unique('vehicle_types', 'code')->ignore($id),
             ],
-            'description' => 'nullable|string',
-            'hourly_rate' => 'sometimes|required|numeric|min:0',
-            'daily_rate' => 'sometimes|required|numeric|min:0',
-            'monthly_rate' => 'sometimes|required|numeric|min:0',
+            'description' => ['nullable', 'string'],
+            'is_active' => ['sometimes', 'boolean'],
         ];
     }
 }
