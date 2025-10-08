@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\UserApprovalController;
+use App\Http\Controllers\VehicleController;
 use App\Http\Controllers\VehicleTypeController;
 use Illuminate\Support\Facades\Route;
 
@@ -33,3 +34,14 @@ Route::middleware(['auth:api', 'ensure.access', 'ensure.admin'])->group(function
 // Vehicle types
 Route::apiResource('vehicle-types', VehicleTypeController::class)
     ->only(['index', 'show']);
+
+// Vehicles
+Route::prefix("vehicles")->group(function () {
+    Route::get('/', [VehicleController::class, 'index']);
+    Route::get('/{id}', [VehicleController::class, 'show']);
+    Route::post('/', [VehicleController::class, 'store']);
+    Route::patch('/{id}', [VehicleController::class, 'update']);
+    Route::delete('/{id}', [VehicleController::class, 'destroy']);
+    Route::post('/primary/{id}', [VehicleController::class, 'setPrimary']);
+    Route::post('/toggle-active/{id}', [VehicleController::class, 'toogleActive']);
+});
