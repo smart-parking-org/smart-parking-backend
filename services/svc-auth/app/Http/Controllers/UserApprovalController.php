@@ -3,8 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AccountStatus;
+use App\Mail\ApproveUserAccountMail;
+use App\Mail\RejectUserAccountMail;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class UserApprovalController extends Controller
 {
@@ -45,34 +49,54 @@ class UserApprovalController extends Controller
      *     @OA\JsonContent(type="object",
      *       @OA\Property(property="message", type="string", example="403 Forbidden")
      *     )
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
      *   )
      * )
      */
     public function approve($id)
     {
-        $user = User::withTrashed()->find($id);
-        if (!$user) {
-            return response()->json([
-                'message' => 'User not found.'
-            ], 404);
-        }
-        if ($user->trashed()) {
-            return response()->json([
-                'message' => 'User is archived (rejected). Ask the user to register again.'
-            ], 400);
-        }
+        try {
+            $user = User::find($id);
+            if (!$user) {
+                return response()->json([
+                    'message' => 'User not found.'
+                ], 404);
+            }
 
-        if ($user->status === AccountStatus::APPROVED) {
-            return response()->json(['message' => 'User already approved'], 400);
-        }
+            if ($user->status === AccountStatus::APPROVED) {
+                return response()->json(['message' => 'User already approved'], 400);
+            }
 
-        $user->update([
-            'status' => AccountStatus::APPROVED,
-            'is_active' => true,
-            'approved_by' => auth('api')->id(),
-            'approved_at' => now(),
-            'rejected_reason' => null,
-        ]);
+            if ($user->status === AccountStatus::REJECTED) {
+                return response()->json(['message' => 'Cannot approve an rejected user'], 400);
+            }
+
+            $user->update([
+                'status' => AccountStatus::APPROVED,
+                'approved_by' => auth('api')->id(),
+                'approved_at' => now(),
+                'rejected_reason' => null,
+            ]);
+            try {
+                Mail::to($user->email)->queue(new ApproveUserAccountMail($user));
+            } catch (\Throwable $e) {
+                Log::warning('Lỗi khi gửi mail xác nhận duyệt tài khoản: ', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi approve tài khoản: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
 
         return response()->json(['message' => 'User approved']);
     }
@@ -105,10 +129,10 @@ class UserApprovalController extends Controller
      *   ),
      *   @OA\Response(
      *     response=400,
-     *     description="Already archived / Cannot reject an approved user",
+     *     description="User approved can't reject",
      *     @OA\JsonContent(
      *       type="object",
-     *       @OA\Property(property="message", type="string", example="User is already archived (rejected).")
+     *       @OA\Property(property="message", type="string", example="Cannot reject an approved user.")
      *     )
      *   ),
      *   @OA\Response(
@@ -142,6 +166,13 @@ class UserApprovalController extends Controller
      *       type="object",
      *       @OA\Property(property="message", type="string", example="403 Forbidden")
      *     )
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
      *   )
      * )
      */
@@ -150,34 +181,48 @@ class UserApprovalController extends Controller
         $data = $request->validate([
             'reason' => ['required', 'string', 'max:500'],
         ]);
+        try {
+            $user = User::find($id);
+            if (!$user) {
+                return response()->json([
+                    'message' => 'User not found.'
+                ], 404);
+            }
 
-        $user = User::withTrashed()->find($id);
-        if (!$user) {
+            if ($user->status === AccountStatus::APPROVED) {
+                return response()->json([
+                    'message' => 'Cannot reject an approved user.'
+                ], 400);
+            }
+            if ($user->status === AccountStatus::REJECTED) {
+                return response()->json([
+                    'message' => 'User already rejected.'
+                ], 400);
+            }
+
+            $user->update([
+                'status' => AccountStatus::REJECTED,
+                'approved_by' => null,
+                'approved_at' => null,
+                'rejected_reason' => $data['reason'],
+            ]);
+
+
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi reject tài khoản: ', ['error' => $e->getMessage()]);
             return response()->json([
-                'message' => 'User not found.'
-            ], 404);
-        }
-        if ($user->trashed()) {
-            return response()->json([
-                'message' => 'User is already archived (rejected).'
-            ], 400);
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
         }
 
-        if ($user->status === AccountStatus::APPROVED) {
-            return response()->json([
-                'message' => 'Cannot reject an approved user.'
-            ], 400);
+        try {
+            Mail::to($user->email)->queue(new RejectUserAccountMail($user, $data['reason']));
+        } catch (\Throwable $e) {
+            Log::warning('Lỗi khi gửi mail từ chối tài khoản: ', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage()
+            ]);
         }
-
-        $user->update([
-            'status' => AccountStatus::REJECTED,
-            'is_active' => false,
-            'approved_by' => null,
-            'approved_at' => null,
-            'rejected_reason' => $data['reason'],
-        ]);
-
-        $user->delete();
 
         return response()->json(['message' => 'User rejected and archived.']);
     }

@@ -7,6 +7,7 @@ use App\Http\Requests\VehicleType\VehicleTypeUpdateRequest;
 use App\Http\Resources\VehicleTypeResource;
 use App\Models\VehicleType;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class VehicleTypeController extends Controller
 {
@@ -59,6 +60,13 @@ class VehicleTypeController extends Controller
      *             ),
      *         )
      *     ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
+     *   )
      * )
      */
     public function index(Request $request)
@@ -66,13 +74,20 @@ class VehicleTypeController extends Controller
         $perPage = (int) $request->query('limit', 10);
         $perPage = min($perPage, 100);
 
-        $query = VehicleType::query()
-            ->when($request->filled('is_active'), fn($q) => $q->where('is_active', $request->boolean('is_active')))
-            ->when($request->filled('search'), fn($q) => $q->where(function ($qq) use ($request) {
-                $s = $request->input('search');
-                $qq->where('name', 'like', "%$s%")
-                    ->orWhere('code', 'like', "%$s%");
-            }))->orderByDesc('id');
+        try {
+            $query = VehicleType::query()
+                ->when($request->filled('is_active'), fn($q) => $q->where('is_active', $request->boolean('is_active')))
+                ->when($request->filled('search'), fn($q) => $q->where(function ($qq) use ($request) {
+                    $s = $request->input('search');
+                    $qq->where('name', 'like', "%$s%")
+                        ->orWhere('code', 'like', "%$s%");
+                }))->orderByDesc('id');
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi lấy danh sách loại phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
 
         $types = $query->paginate($perPage)->appends($request->query());
 
@@ -108,12 +123,26 @@ class VehicleTypeController extends Controller
      *     response=422,
      *     description="Validation error",
      *     @OA\JsonContent(ref="#/components/schemas/VehicleTypeValidationError")
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
      *   )
      * )
      */
     public function store(VehicleTypeStoreRequest $request)
     {
-        $vt = VehicleType::create($request->validated());
+        try {
+            $vt = VehicleType::create($request->validated());
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi thêm loại phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
         return (new VehicleTypeResource($vt))->response()->setStatusCode(201);
     }
 
@@ -139,12 +168,26 @@ class VehicleTypeController extends Controller
      *     @OA\JsonContent(type="object",
      *       @OA\Property(property="message", type="string", example="Vehicle type not found")
      *     )
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
      *   )
      * )
      */
     public function show($id)
     {
-        $vt = VehicleType::find($id);
+        try {
+            $vt = VehicleType::find($id);
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi xem chi tiết loại phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
         if (!$vt) {
             return response()->json(['message' => 'Vehicle type not found'], 404);
         }
@@ -184,17 +227,31 @@ class VehicleTypeController extends Controller
      *     response=422,
      *     description="Validation error",
      *     @OA\JsonContent(ref="#/components/schemas/VehicleTypeValidationError")
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
      *   )
      * )
      */
     public function update(VehicleTypeUpdateRequest $request, string $id)
     {
-        $vt = VehicleType::find($id);
-        if (!$vt) {
-            return response()->json(['message' => 'Vehicle type not found'], 404);
-        }
+        try {
+            $vt = VehicleType::find($id);
+            if (!$vt) {
+                return response()->json(['message' => 'Vehicle type not found'], 404);
+            }
 
-        $vt->update($request->validated());
+            $vt->update($request->validated());
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi cập nhật loại phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
         return new VehicleTypeResource($vt->refresh());
     }
 
@@ -226,17 +283,31 @@ class VehicleTypeController extends Controller
      *       type="object",
      *       example={"message": "Cannot delete: resource is referenced by other records."}
      *     )
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
      *   )
      * )
      */
     public function destroy(string $id)
     {
-        $vt = VehicleType::find($id);
-        if (!$vt) {
-            return response()->json(['message' => 'Vehicle type not found'], 404);
-        }
+        try {
+            $vt = VehicleType::find($id);
+            if (!$vt) {
+                return response()->json(['message' => 'Vehicle type not found'], 404);
+            }
 
-        $vt->delete();
+            $vt->delete();
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi xóa loại phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
         return response()->noContent();
     }
 

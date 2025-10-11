@@ -7,6 +7,7 @@ use App\Http\Requests\Vehicle\VehicleUpdateRequest;
 use App\Http\Resources\VehicleResource;
 use App\Models\Vehicle;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class VehicleController extends Controller
 {
@@ -74,6 +75,13 @@ class VehicleController extends Controller
      *             ),
      *         )
      *     ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
+     *   )
      * )
      */
     public function index(Request $request)
@@ -81,29 +89,36 @@ class VehicleController extends Controller
         $perPage = (int) $request->query('limit', 10);
         $perPage = min($perPage, 100);
 
-        $query = Vehicle::query()
-            ->when(
-                $request->filled('is_active'),
-                fn($q) => $q->where('is_active', $request->boolean('is_active'))
-            )
-            ->when(
-                $request->filled('type_id'),
-                fn($q) => $q->where('type_id', $request->query('type_id'))
-            )
-            ->when($request->filled('user_id'), fn($q) => $q->where('user_id', $request->query('user_id')))
+        try {
+            $query = Vehicle::query()
+                ->when(
+                    $request->filled('is_active'),
+                    fn($q) => $q->where('is_active', $request->boolean('is_active'))
+                )
+                ->when(
+                    $request->filled('type_id'),
+                    fn($q) => $q->where('type_id', $request->query('type_id'))
+                )
+                ->when($request->filled('user_id'), fn($q) => $q->where('user_id', $request->query('user_id')))
 
-            ->when($request->filled('search'), function ($q) use ($request) {
-                $s = $request->input('search');
-                $q->where(function ($qq) use ($s) {
-                    $qq->where('license_plate', 'like', "%$s%")
-                        ->orWhereHas('user', fn($uq) =>
-                            $uq->where('name', 'like', "%$s%"));
-                });
-            })
-            ->with(['user:id,name,email,phone', 'type:id,name,code'])
-            ->orderByDesc('id');
+                ->when($request->filled('search'), function ($q) use ($request) {
+                    $s = $request->input('search');
+                    $q->where(function ($qq) use ($s) {
+                        $qq->where('license_plate', 'like', "%$s%")
+                            ->orWhereHas('user', fn($uq) =>
+                                $uq->where('name', 'like', "%$s%"));
+                    });
+                })
+                ->with(['user:id,name,email,phone', 'type:id,name,code'])
+                ->orderByDesc('id');
+            $vehicles = $query->paginate($perPage)->appends($request->query());
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi lấy danh sách phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
 
-        $vehicles = $query->paginate($perPage)->appends($request->query());
         return response()->json([
             'data' => VehicleResource::collection($vehicles->items()),
             'pagination' => [
@@ -150,18 +165,39 @@ class VehicleController extends Controller
      *         )
      *       )
      *     )
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
      *   )
      * )
      */
     public function store(VehicleStoreRequest $request)
     {
-        $vehicle = Vehicle::create($request->validated())->refresh();
+        try {
+            $vehicle = Vehicle::create($request->validated())->refresh();
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi thêm phương tiện mới: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
         return (new VehicleResource($vehicle))->response()->setStatusCode(201);
     }
 
     public function show(string $id)
     {
-        $vehicle = Vehicle::find($id);
+        try {
+            $vehicle = Vehicle::find($id);
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi xem chi tiết phương tiện mới: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
         if (!$vehicle) {
             return response()->json(['message' => 'Vehicle not found'], 404);
         }
@@ -214,17 +250,32 @@ class VehicleController extends Controller
      *         )
      *       )
      *     )
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
      *   )
      * )
      */
     public function update(VehicleUpdateRequest $request, string $id)
     {
-        $vehicle = Vehicle::find($id);
-        if (!$vehicle) {
-            return response()->json(['message' => 'Vehicle not found'], 404);
+        try {
+            $vehicle = Vehicle::find($id);
+            if (!$vehicle) {
+                return response()->json(['message' => 'Vehicle not found'], 404);
+            }
+
+            $vehicle->update($request->validated());
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi cập nhật phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
         }
 
-        $vehicle->update($request->validated());
         return new VehicleResource($vehicle->refresh());
     }
 
@@ -248,26 +299,40 @@ class VehicleController extends Controller
      *       @OA\Property(property="message", type="string", example="Vehicle not found")
      *     )
      *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
+     *   )
      * )
      */
     public function destroy(string $id)
     {
-        $vehicle = Vehicle::find($id);
-        if (!$vehicle) {
-            return response()->json(['message' => 'Vehicle not found'], 404);
-        }
-
-        if ($vehicle->is_primary) {
-            $another = Vehicle::where('user_id', $vehicle->user_id)
-                ->where('is_active', true)
-                ->where('id', '!=', $vehicle->id)
-                ->first();
-            if ($another) {
-                $another->update(['is_primary' => true]);
+        try {
+            $vehicle = Vehicle::find($id);
+            if (!$vehicle) {
+                return response()->json(['message' => 'Vehicle not found'], 404);
             }
+
+            if ($vehicle->is_primary) {
+                $another = Vehicle::where('user_id', $vehicle->user_id)
+                    ->where('is_active', true)
+                    ->where('id', '!=', $vehicle->id)
+                    ->first();
+                if ($another) {
+                    $another->update(['is_primary' => true]);
+                }
+            }
+            $vehicle->delete();
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi xóa phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
         }
 
-        $vehicle->delete();
         return response()->noContent();
     }
 
@@ -292,18 +357,32 @@ class VehicleController extends Controller
      *       @OA\Property(property="message", type="string", example="Vehicle not found")
      *     )
      *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
+     *   )
      * )
      */
     public function setPrimary(string $id)
     {
-        $vehicle = Vehicle::find($id);
-        if (!$vehicle) {
-            return response()->json(['message' => 'Vehicle not found'], 404);
-        }
-        if (!$vehicle->is_primary) {
-            // Reset tất cả xe của user này về false
-            Vehicle::where('user_id', $vehicle->user_id)->update(['is_primary' => false]);
-            $vehicle->update(['is_primary' => true]);
+        try {
+            $vehicle = Vehicle::find($id);
+            if (!$vehicle) {
+                return response()->json(['message' => 'Vehicle not found'], 404);
+            }
+            if (!$vehicle->is_primary) {
+                // Reset tất cả xe của user này về false
+                Vehicle::where('user_id', $vehicle->user_id)->update(['is_primary' => false]);
+                $vehicle->update(['is_primary' => true]);
+            }
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi set phương tiện mặc định: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
         }
 
         return new VehicleResource($vehicle->refresh());
@@ -330,27 +409,41 @@ class VehicleController extends Controller
      *       @OA\Property(property="message", type="string", example="Vehicle not found")
      *     )
      *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
+     *   )
      * )
      */
     public function toogleActive(string $id)
     {
-        $vehicle = Vehicle::find($id);
-        if (!$vehicle) {
-            return response()->json(['message' => 'Vehicle not found'], 404);
-        }
-
-        $vehicle->is_active = !$vehicle->is_active;
-        $vehicle->save();
-
-        if (!$vehicle->is_active && $vehicle->is_primary) {
-            $vehicle->update(['is_primary' => false]);
-            $another = Vehicle::where('user_id', $vehicle->user_id)
-                ->where('is_active', true)
-                ->where('id', '!=', $vehicle->id)
-                ->first();
-            if ($another) {
-                $another->update(['is_primary' => true]);
+        try {
+            $vehicle = Vehicle::find($id);
+            if (!$vehicle) {
+                return response()->json(['message' => 'Vehicle not found'], 404);
             }
+
+            $vehicle->is_active = !$vehicle->is_active;
+            $vehicle->save();
+
+            if (!$vehicle->is_active && $vehicle->is_primary) {
+                $vehicle->update(['is_primary' => false]);
+                $another = Vehicle::where('user_id', $vehicle->user_id)
+                    ->where('is_active', true)
+                    ->where('id', '!=', $vehicle->id)
+                    ->first();
+                if ($another) {
+                    $another->update(['is_primary' => true]);
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi toggle active phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
         }
 
         return new VehicleResource($vehicle->refresh());
