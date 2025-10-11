@@ -15,14 +15,11 @@ class UserSeeder extends Seeder
     public function run(): void
     {
         User::create([
-            'name' => 'System Admin',
+            'name' => 'Quản trị hệ thống',
             'email' => 'admin@gmail.com',
-            'phone' => '0342333084',
+            'phone' => '0919999999',
             'password' => '12345678',
-            'cccd_hash' => sha1('999999999999'),
-            'cccd_masked' => '999******999',
             'role' => 'admin',
-            'is_active' => true,
             'status' => AccountStatus::APPROVED
         ]);
     }

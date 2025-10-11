@@ -6,45 +6,38 @@ namespace App\Models;
 use App\Enums\AccountStatus;
 use App\Enums\UserRole;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use PHPOpenSourceSaver\JWTAuth\Contracts\JWTSubject;
 
 class User extends Authenticatable implements JWTSubject
 {
-    use HasFactory, Notifiable, SoftDeletes;
+    use HasFactory, Notifiable;
 
     protected $fillable = [
         'name',
         'email',
         'phone',
         'apartment_code',
-        'cccd_hash',
-        'cccd_masked',
         'password',
         'status',
         'approved_by',
-        'is_active',
         'approved_at',
-        'rejected_reason'
+        'rejected_reason',
+        'role'
     ];
 
     protected $hidden = [
         'password',
-        'cccd_hash',
     ];
 
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
-            'phone_verified_at' => 'datetime',
             'approved_at' => 'datetime',
-            'is_active' => 'boolean',
             'password' => 'hashed',
-            'status' => AccountStatus::class,
-            'role' => UserRole::class
+            'role' => UserRole::class,
+            'status' => AccountStatus::class
         ];
     }
 
@@ -53,7 +46,6 @@ class User extends Authenticatable implements JWTSubject
         return $this->belongsTo(self::class, 'approved_by');
     }
 
-    // ---- JWTSubject required ----
     public function getJWTIdentifier()
     {
         return $this->getKey();
@@ -61,8 +53,6 @@ class User extends Authenticatable implements JWTSubject
 
     public function getJWTCustomClaims()
     {
-        return [
-            'role' => $this->role,
-        ];
+        return [];
     }
 }

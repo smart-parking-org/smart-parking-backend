@@ -4,7 +4,7 @@ namespace App\Http\Requests\Auth;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class LoginRequest extends FormRequest
+class VerifyOtpRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -23,10 +23,9 @@ class LoginRequest extends FormRequest
     {
         return [
             'email' => 'bail|required|email:rfc,dns|max:150',
-            'password' => 'bail|required|string|min:8',
+            'otp' => 'bail|required|digits:6',
         ];
     }
-
     public function messages()
     {
         return [
@@ -35,10 +34,9 @@ class LoginRequest extends FormRequest
             'email.email' => 'Email không hợp lệ',
             'email.max' => 'Email không được vượt quá :max ký tự',
 
-            // Mật khẩu
-            'password.required' => 'Vui lòng nhập mật khẩu',
-            'password.string' => 'Mật khẩu phải là chuỗi ký tự',
-            'password.min' => 'Mật khẩu phải có ít nhất :min ký tự',
+            // Otp
+            'otp.required' => 'Vui lòng nhập mã OTP',
+            'otp.digits' => 'Mã OTP phải gồm :digits chữ số',
         ];
     }
 }
