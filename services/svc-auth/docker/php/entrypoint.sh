@@ -22,4 +22,6 @@ php artisan route:clear || true
 php artisan cache:clear || true
 php artisan view:clear || true
 
-exec php-fpm
+php-fpm -D
+
+exec "$@"

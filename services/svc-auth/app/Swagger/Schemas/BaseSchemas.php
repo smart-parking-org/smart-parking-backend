@@ -12,6 +12,13 @@ namespace App\Swagger\Schemas;
  *     @OA\Property(property="current_page", type="integer", example=1),
  *     @OA\Property(property="last_page", type="integer", example=5)
  * )
+ *
+ * @OA\Schema(
+ *   schema="ErrorResponse",
+ *   type="object",
+ *   required={"message"},
+ *   @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau."),
+ * )
  */
 class BaseSchemas
 {

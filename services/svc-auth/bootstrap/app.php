@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Middleware\EnsureAccessToken;
 use App\Http\Middleware\EnsureAdmin;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -15,7 +14,6 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
-            'ensure.access' => EnsureAccessToken::class,
             'ensure.admin' => EnsureAdmin::class,
         ]);
     })
