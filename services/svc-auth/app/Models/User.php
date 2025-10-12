@@ -47,6 +47,11 @@ class User extends Authenticatable implements JWTSubject
         return $this->belongsTo(self::class, 'approved_by');
     }
 
+    public function vehicles()
+    {
+        return $this->hasMany(Vehicle::class);
+    }
+
     public function getJWTIdentifier()
     {
         return $this->getKey();
