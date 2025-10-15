@@ -5,7 +5,7 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-class ParkingZoneResource extends JsonResource
+class ParkingSlotResource extends JsonResource
 {
     /**
      * Transform the resource into an array.
@@ -17,11 +17,13 @@ class ParkingZoneResource extends JsonResource
         return [
             'id' => $this->id,
             'code' => $this->code,
-            'name' => $this->name,
-            'capacity' => $this->capacity,
-            'description' => $this->description,
-            'is_active' => (bool) $this->is_active,
-            'slots' => ParkingSlotResource::collection($this->whenLoaded('slots')),
+            'vehicle_type' => $this->vehicle_type,
+            'status' => $this->status->value,
+            'is_active' => $this->is_active,
+            'zone' => [
+                'id' => $this->zone->id,
+                'name' => $this->zone->name,
+            ],
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
         ];
