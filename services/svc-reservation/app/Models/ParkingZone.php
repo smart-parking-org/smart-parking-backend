@@ -18,4 +18,9 @@ class ParkingZone extends Model
         'is_active' => 'boolean',
         'capacity' => 'integer',
     ];
+
+    public function slots()
+    {
+        return $this->hasMany(ParkingSlot::class, 'zone_id');
+    }
 }

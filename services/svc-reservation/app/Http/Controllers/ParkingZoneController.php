@@ -199,7 +199,7 @@ class ParkingZoneController extends Controller
     public function show(string $id)
     {
         try {
-            $pz = ParkingZone::find($id);
+            $pz = ParkingZone::with(['slots' => fn($q) => $q->orderByDesc('id')])->find($id);
         } catch (\Throwable $e) {
             Log::error('Lỗi khi xem chi tiết bãi đỗ: ', ['error' => $e->getMessage()]);
             return response()->json([
