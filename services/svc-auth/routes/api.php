@@ -27,25 +27,6 @@ Route::prefix('auth')->group(function () {
     });
 });
 
-
-Route::middleware(['auth:api', 'ensure.admin'])->group(function () {
-    // Vehicle types
-    Route::apiResource('vehicle-types', VehicleTypeController::class)->only(['store', 'update', 'destroy']);
-
-    Route::prefix('admin')->group(function () {
-        Route::patch('/users/{id}/approve', [UserApprovalController::class, 'approve']);
-        Route::patch('/users/{id}/reject', [UserApprovalController::class, 'reject']);
-
-        // Vehicle types
-        Route::post('/vehicle-types/{id}/activate', [VehicleTypeController::class, 'activate']);
-        Route::post('/vehicle-types/{id}/deactivate', [VehicleTypeController::class, 'deactivate']);
-    });
-});
-
-// Vehicle types
-Route::apiResource('vehicle-types', VehicleTypeController::class)
-    ->only(['index', 'show']);
-
 // Vehicles
 Route::prefix("vehicles")->group(function () {
     Route::get('/', [VehicleController::class, 'index']);
@@ -58,6 +39,8 @@ Route::prefix("vehicles")->group(function () {
 });
 
 
+// FCM
+Route::put('/me/fcm-token', [UserController::class, 'updateFcmToken']);
 // Users
 Route::prefix("users")->group(function () {
     Route::get('/', [UserController::class, 'index']);

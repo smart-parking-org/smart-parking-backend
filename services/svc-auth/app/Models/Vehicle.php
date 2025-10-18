@@ -8,7 +8,7 @@ class Vehicle extends Model
 {
     protected $fillable = [
         'user_id',
-        'type_id',
+        'vehicle_type',
         'license_plate',
         'is_primary',
         'is_active'
@@ -22,10 +22,5 @@ class Vehicle extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
-    }
-
-    public function type()
-    {
-        return $this->belongsTo(VehicleType::class);
     }
 }

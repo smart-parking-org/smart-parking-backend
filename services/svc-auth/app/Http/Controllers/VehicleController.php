@@ -46,11 +46,14 @@ class VehicleController extends Controller
      *         @OA\Schema(type="boolean", example=true)
      *     ),
      *     @OA\Parameter(
-     *         name="type_id",
+     *         name="vehicle_type",
      *         in="query",
-     *         description="Lọc theo loại xe",
+     *         description="Lọc theo loại xe: 'motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'",
      *         required=false,
-     *         @OA\Schema(type="integer", example="")
+     *         @OA\Schema(
+     *              type="string",
+     *              enum={"motorbike", "car_4_seat", "car_7_seat", "light_truck"}
+     *         )
      *     ),
      *     @OA\Parameter(
      *         name="user_id",
@@ -96,8 +99,8 @@ class VehicleController extends Controller
                     fn($q) => $q->where('is_active', $request->boolean('is_active'))
                 )
                 ->when(
-                    $request->filled('type_id'),
-                    fn($q) => $q->where('type_id', $request->query('type_id'))
+                    $request->filled('vehicle_type'),
+                    fn($q) => $q->where('vehicle_type', $request->query('vehicle_type'))
                 )
                 ->when($request->filled('user_id'), fn($q) => $q->where('user_id', $request->query('user_id')))
 
@@ -109,7 +112,7 @@ class VehicleController extends Controller
                                 $uq->where('name', 'like', "%$s%"));
                     });
                 })
-                ->with(['user:id,name,email,phone', 'type:id,name,code'])
+                ->with(['user:id,name,email,phone'])
                 ->orderByDesc('id');
             $vehicles = $query->paginate($perPage)->appends($request->query());
         } catch (\Throwable $e) {
@@ -134,13 +137,13 @@ class VehicleController extends Controller
      * @OA\Post(
      *   path="/vehicles",
      *   tags={"Vehicles"},
-     *   summary="Tạo phương tiện mới",
+     *   summary="Tạo phương tiện mới (vehicle_type=['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'])",
      *   @OA\RequestBody(
      *     required=true,
      *     @OA\JsonContent(
-     *       required={"user_id","type_id","license_plate"},
+     *       required={"user_id","vehicle_type","license_plate"},
      *       @OA\Property(property="user_id", type="integer", example=1),
-     *       @OA\Property(property="type_id", type="integer", example=4),
+     *       @OA\Property(property="vehicle_type", type="string", example="motorbike"),
      *       @OA\Property(property="license_plate", type="string", example="94K-123.48"),
      *     )
      *   ),
@@ -177,21 +180,58 @@ class VehicleController extends Controller
      */
     public function store(VehicleStoreRequest $request)
     {
+        $data = $request->validated();
         try {
-            $vehicle = Vehicle::create($request->validated())->refresh();
+            $vehicle = Vehicle::create([
+                'user_id' => $data['user_id'],
+                'vehicle_type' => $data['vehicle_type'],
+                'license_plate' => $data['license_plate']
+            ]);
         } catch (\Throwable $e) {
             Log::error('Lỗi khi thêm phương tiện mới: ', ['error' => $e->getMessage()]);
             return response()->json([
                 'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
             ], 500);
         }
-        return (new VehicleResource($vehicle))->response()->setStatusCode(201);
+        return (new VehicleResource($vehicle->refresh()))->response()->setStatusCode(201);
     }
 
+    /**
+     * @OA\Get(
+     *   path="/vehicles/{id}",
+     *   tags={"Vehicles"},
+     *   summary="Lấy thông tin chi tiết phương tiện",
+     *   @OA\Parameter(
+     *     name="id", in="path", required=true, description="Vehicle ID",
+     *     @OA\Schema(type="integer", example=1)
+     *   ),
+     *   @OA\Response(
+     *     response=200,
+     *     description="OK",
+     *     @OA\JsonContent(
+     *        @OA\Property(property="data", ref="#/components/schemas/Vehicle")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=404,
+     *     description="Không tìm thấy người dùng",
+     *     @OA\JsonContent(type="object",
+     *       @OA\Property(property="message", type="string", example="Không tìm thấy người dùng")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
+     *   )
+     * )
+     */
     public function show(string $id)
     {
         try {
-            $vehicle = Vehicle::find($id);
+            $vehicle = Vehicle::with('user:id,name,email,phone')->find($id);
         } catch (\Throwable $e) {
             Log::error('Lỗi khi xem chi tiết phương tiện mới: ', ['error' => $e->getMessage()]);
             return response()->json([
@@ -217,8 +257,7 @@ class VehicleController extends Controller
      *   @OA\RequestBody(
      *     required=false,
      *     @OA\JsonContent(
-     *       @OA\Property(property="user_id", type="integer", example=1),
-     *       @OA\Property(property="type_id", type="integer", example=4),
+     *       @OA\Property(property="vehicle_type", type="string", example="motorbike"),
      *       @OA\Property(property="license_plate", type="string", example="94K-123.48"),
      *     )
      *   ),
@@ -373,7 +412,8 @@ class VehicleController extends Controller
             if (!$vehicle) {
                 return response()->json(['message' => 'Vehicle not found'], 404);
             }
-            if (!$vehicle->is_primary) {
+
+            if ($vehicle->is_active && !$vehicle->is_primary) {
                 // Reset tất cả xe của user này về false
                 Vehicle::where('user_id', $vehicle->user_id)->update(['is_primary' => false]);
                 $vehicle->update(['is_primary' => true]);

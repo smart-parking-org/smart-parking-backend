@@ -25,8 +25,7 @@ class VehicleUpdateRequest extends FormRequest
         $id = $this->route('id');
 
         return [
-            'user_id' => ['sometimes', 'exists:users,id'],
-            'type_id' => ['sometimes', 'exists:vehicle_types,id'],
+            'vehicle_type' => ['sometimes', 'required', Rule::in(['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'])],
             'license_plate' => [
                 'sometimes',
                 'required',

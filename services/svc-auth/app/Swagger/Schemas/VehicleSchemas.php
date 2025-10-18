@@ -15,13 +15,7 @@ namespace App\Swagger\Schemas;
  *     @OA\Property(property="email", type="string", example="user@gmail.com"),
  *     @OA\Property(property="phone", type="string", example="0919123456")
  *   ),
- *   @OA\Property(
- *     property="type",
- *     type="object",
- *     @OA\Property(property="id", type="integer", example=4),
- *     @OA\Property(property="name", type="string", example="Xe tải nhẹ"),
- *     @OA\Property(property="code", type="string", example="truck")
- *   ),
+ *   @OA\Property(property="vehicle_type", type="string", maxLength=20, example="motorbike"),
  *   @OA\Property(property="license_plate", type="string", maxLength=20, example="94K-123.45"),
  *   @OA\Property(property="is_active", type="boolean", example=true),
  *   @OA\Property(property="is_primary", type="boolean", example=false),

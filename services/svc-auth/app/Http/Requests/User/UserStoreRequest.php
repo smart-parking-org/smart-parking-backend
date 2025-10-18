@@ -31,11 +31,9 @@ class UserStoreRequest extends FormRequest
                 'bail',
                 'required',
                 'string',
-                'max:15', // để phòng trường hợp nhập +84
-                'unique:users,phone',
+                'max:15',
                 'regex:/^(0|\+84)(3[2-9]|5[2689]|7[0|6-9]|8[1-9]|9[0-9])[0-9]{7}$/'
             ],
-            'apartment_code' => 'bail|nullable|string|max:50',
             'role' => ['required', Rule::in(array_column(UserRole::cases(), 'value'))],
         ];
     }
@@ -63,13 +61,7 @@ class UserStoreRequest extends FormRequest
             'phone.required' => 'Vui lòng nhập số điện thoại',
             'phone.string' => 'Số điện thoại phải là chuỗi ký tự',
             'phone.max' => 'Số điện thoại không hợp lệ',
-            'phone.unique' => 'Số điện thoại đã được sử dụng',
             'phone.regex' => 'Số điện thoại không hợp lệ',
-
-            // Mã căn hộ
-            'apartment_code.required' => 'Vui lòng nhập mã căn hộ',
-            'apartment_code.string' => 'Mã căn hộ phải là chuỗi ký tự',
-            'apartment_code.max' => 'Mã căn hộ không được vượt quá :max ký tự',
 
             // Vai trò
             'role.required' => 'Vui lòng chọn vai trò',

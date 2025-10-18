@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Auth;
 
 use App\Models\User;
 use App\Enums\UserRole;
-use App\Enums\AccountStatus;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
@@ -40,24 +39,23 @@ class AuthController extends Controller
      * @OA\Post(
      *   path="/auth/register",
      *   summary="Đăng ký tài khoản mới",
-     *   description="Tạo tài khoản mới ở trạng thái pending, gửi email thông báo và chờ admin duyệt.",
+     *   description="Tạo tài khoản mới",
      *   tags={"Auth"},
      *   @OA\RequestBody(
      *     required=true,
      *     @OA\JsonContent(
-     *       required={"name","email","phone","apartment_code","password"},
-     *       @OA\Property(property="name", type="string", example="Nguyễn Văn A", maxLength=100),
-     *       @OA\Property(property="email", type="string", format="email", example="user@example.com", maxLength=150),
+     *       required={"name","email","phone","password"},
+     *       @OA\Property(property="name", type="string", example="Nguyễn Văn A", maxLength=255),
+     *       @OA\Property(property="email", type="string", format="email", example="user@gmail.com", maxLength=255),
      *       @OA\Property(property="phone", type="string", example="0901234567", maxLength=20),
-     *       @OA\Property(property="apartment_code", type="string", example="B2-1205", maxLength=50),
-     *       @OA\Property(property="password", type="string", format="password", example="secret@123", minLength=8)
+     *       @OA\Property(property="password", type="string", format="password", example="12345678", minLength=8)
      *     )
      *   ),
      *   @OA\Response(
      *     response=201,
      *     description="Đăng ký thành công",
      *     @OA\JsonContent(
-     *       @OA\Property(property="message", type="string", example="Đăng ký thành công, vui lòng chờ admin duyệt.")
+     *       @OA\Property(property="message", type="string", example="Đăng ký thành công")
      *     )
      *   ),
      *   @OA\Response(
@@ -90,10 +88,8 @@ class AuthController extends Controller
                 'name' => $request->name,
                 'email' => $request->email,
                 'phone' => $request->phone,
-                'apartment_code' => $request->apartment_code,
                 'password' => Hash::make($request->password),
                 'role' => UserRole::RESIDENT,
-                'status' => AccountStatus::PENDING,
             ]);
             DB::commit();
         } catch (\Throwable $e) {
@@ -114,7 +110,7 @@ class AuthController extends Controller
         }
 
         return response()->json([
-            'message' => 'Đăng ký thành công, vui lòng chờ admin duyệt.'
+            'message' => 'Đăng ký thành công'
         ], 201);
     }
 
@@ -128,8 +124,8 @@ class AuthController extends Controller
      *     required=true,
      *     @OA\JsonContent(
      *       required={"email","password"},
-     *       @OA\Property(property="email", type="string", format="email", example="user@example.com", maxLength=150),
-     *       @OA\Property(property="password", type="string", format="password", example="secret@123", minLength=8)
+     *       @OA\Property(property="email", type="string", format="email", example="user@gmail.com", maxLength=255),
+     *       @OA\Property(property="password", type="string", format="password", example="12345678", minLength=8)
      *     )
      *   ),
      *   @OA\Response(
@@ -148,17 +144,14 @@ class AuthController extends Controller
      *     response=401,
      *     description="Sai thông tin đăng nhập",
      *     @OA\JsonContent(
-     *       @OA\Property(property="error", type="string", example="Email hoặc mật khẩu không đúng")
+     *       @OA\Property(property="message", type="string", example="Email hoặc mật khẩu không đúng")
      *     )
      *   ),
      *   @OA\Response(
      *     response=403,
-     *     description="Tài khoản chưa được phép đăng nhập (pending/rejected)",
+     *     description="Tài khoản bị khóa",
      *     @OA\JsonContent(
-     *       oneOf={
-     *         @OA\Schema(type="object", @OA\Property(property="error", type="string", example="Tài khoản của bạn đang chờ admin duyệt")),
-     *         @OA\Schema(type="object", @OA\Property(property="error", type="string", example="Tài khoản của bạn đã bị từ chối"))
-     *       }
+     *        @OA\Property(property="message", type="string", example="Tài khoản của bạn đã bị khóa")
      *     )
      *   ),
      *   @OA\Response(
@@ -173,18 +166,13 @@ class AuthController extends Controller
         $credentials = $request->validated();
         try {
             if (!$token = auth('api')->attempt($credentials)) {
-                return response()->json(['error' => 'Email hoặc mật khẩu không đúng'], 401);
+                return response()->json(['message' => 'Email hoặc mật khẩu không đúng'], 401);
             }
 
             $user = auth('api')->user();
-            if ($user->status === AccountStatus::PENDING) {
-                auth('api')->logout();
-                return response()->json(['error' => 'Tài khoản của bạn đang chờ admin duyệt'], 403);
-            }
-
-            if ($user->status === AccountStatus::REJECTED) {
-                auth('api')->logout();
-                return response()->json(['error' => 'Tài khoản của bạn đã bị từ chối'], 403);
+            if ($user->is_active === false) {
+                auth('api')->logout(true);
+                return response()->json(['message' => 'Tài khoản của bạn đã bị khóa'], 403);
             }
 
             return $this->respondWithToken($token);
@@ -210,9 +198,8 @@ class AuthController extends Controller
      *       type="object",
      *       @OA\Property(property="id", type="integer", example=1),
      *       @OA\Property(property="name", type="string", example="Nguyen Van A"),
-     *       @OA\Property(property="email", type="string", format="email", example="user@example.com"),
+     *       @OA\Property(property="email", type="string", format="email", example="user@gmail.com"),
      *       @OA\Property(property="phone", type="string", example="0912345678"),
-     *       @OA\Property(property="apartment_code", type="string", nullable=true, example="B2-1206"),
      *       @OA\Property(property="role", type="string", example="resident")
      *     )
      *   ),
@@ -240,11 +227,10 @@ class AuthController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'phone' => $user->phone,
-                'apartment_code' => $user->apartment_code,
                 'role' => $user->role
             ]);
         } catch (\Throwable $e) {
-            Log::error('Lỗi khi đăng xuất: ', ['error' => $e->getMessage()]);
+            Log::error('Lỗi khi lấy thông tin tài khoản: ', ['error' => $e->getMessage()]);
             return response()->json([
                 'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
             ], 500);
@@ -284,7 +270,9 @@ class AuthController extends Controller
     public function logout()
     {
         try {
-            auth('api')->logout();
+            $user = auth('api')->user();
+            $user->update(['fcm_token' => null]);
+            auth('api')->logout(true);
             return response()->json(['message' => 'Đăng xuất thành công']);
         } catch (\Throwable $e) {
             Log::error('Lỗi khi đăng xuất: ', ['error' => $e->getMessage()]);
@@ -356,7 +344,7 @@ class AuthController extends Controller
      *         property="email",
      *         type="string",
      *         format="email",
-     *         example="user@example.com",
+     *         example="user@gmail.com",
      *         maxLength=150
      *       )
      *     )
@@ -419,7 +407,7 @@ class AuthController extends Controller
         }
 
         $user = User::where('email', $data['email'])->first();
-        if ($user && $user->status === AccountStatus::APPROVED) {
+        if ($user?->is_active) {
             $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
             $otpHash = Hash::make($otp);
             $key = $this->otpKey($data['email']);
@@ -458,7 +446,7 @@ class AuthController extends Controller
      *     required=true,
      *     @OA\JsonContent(
      *       required={"email","otp"},
-     *       @OA\Property(property="email", type="string", format="email", example="user@example.com", maxLength=150),
+     *       @OA\Property(property="email", type="string", format="email", example="user@gmail.com", maxLength=150),
      *       @OA\Property(property="otp", type="string", example="123456", pattern="^[0-9]{6}$", description="OTP 6 chữ số")
      *     )
      *   ),
@@ -566,7 +554,7 @@ class AuthController extends Controller
      *     required=true,
      *     @OA\JsonContent(
      *       required={"email","reset_token","password","password_confirmation"},
-     *       @OA\Property(property="email", type="string", format="email", example="user@example.com", maxLength=150),
+     *       @OA\Property(property="email", type="string", format="email", example="user@gmail.com", maxLength=150),
      *       @OA\Property(property="reset_token", type="string", example="a1b2c3d4e5... (64 ký tự)"),
      *       @OA\Property(property="password", type="string", format="password", example="Secret@123", minLength=8)
      *     )

@@ -13,29 +13,20 @@ return new class extends Migration {
         Schema::create('users', function (Blueprint $table) {
             $table->id();
 
-            $table->string('name', 100);
-            $table->string('email', 150)->unique();
-            $table->string('phone', 20)->nullable()->unique();
-            $table->string('apartment_code', 50)->nullable();
+            $table->string('name', 255);
+            $table->string('email', 255)->unique();
+            $table->string('phone', 20);
+            $table->string('password', 255);
+            $table->enum('role', ['resident', 'admin', 'staff'])->default('resident');
 
-            $table->string('password');
-            $table->enum('role', ['resident', 'admin'])->default('resident');
-
-            $table->enum('status', ['pending', 'approved', 'rejected'])->default('pending');
-            $table->foreignId('approved_by')
-                ->nullable()
-                ->constrained('users')
-                ->nullOnDelete();
-            $table->timestamp('approved_at')->nullable();
-            $table->string('rejected_reason')->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->text('fcm_token')->nullable();
 
             $table->timestamps();
             $table->softDeletes();
 
-            $table->index('apartment_code');
             $table->index('role');
-            $table->index('status');
-            $table->index('deleted_at');
+            $table->index('email');
         });
     }
 

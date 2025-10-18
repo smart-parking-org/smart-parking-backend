@@ -42,11 +42,11 @@ class UserController extends Controller
      *         @OA\Schema(type="string", example="without")
      *     ),
      *     @OA\Parameter(
-     *         name="status",
+     *         name="is_active",
      *         in="query",
-     *         description="Lọc theo trạng thái người dùng (pending/approved/rejected)",
+     *         description="Lọc theo trạng thái người dùng",
      *         required=false,
-     *         @OA\Schema(type="string", example="approved")
+     *         @OA\Schema(type="boolean", example=true)
      *     ),
      *     @OA\Parameter(
      *         name="search",
@@ -98,8 +98,8 @@ class UserController extends Controller
                 $query->onlyTrashed();
             }
 
-            if ($request->filled('status')) {
-                $query->where('status', $request->query('status'));
+            if ($request->filled('is_active')) {
+                $query->where('is_active', (bool) $request->query('is_active'));
             }
 
             if ($request->filled('search')) {
@@ -145,7 +145,6 @@ class UserController extends Controller
      *       @OA\Property(property="email", type="string", example="user@gmail.com"),
      *       @OA\Property(property="phone", type="string", example="0342123564"),
      *       @OA\Property(property="password", type="string", example="password123"),
-     *       @OA\Property(property="apartment_code", type="string", example="B-123"),
      *       @OA\Property(property="role", type="string", example="resident"),
      *     )
      *   ),
@@ -189,11 +188,8 @@ class UserController extends Controller
                 'phone' => $data['phone'],
                 'email' => $data['email'],
                 'password' => Hash::make($data['password']),
-                'apartment_code' => $data['apartment_code'] ?? null,
                 'role' => $data['role'],
-                'status' => AccountStatus::APPROVED,
-                'approved_at' => now(),
-                'approved_by' => auth('api')->id()
+                'is_active' => true
             ]);
         } catch (\Throwable $e) {
             Log::error('Lỗi khi thêm người dùng: ', ['error' => $e->getMessage()]);
@@ -204,7 +200,6 @@ class UserController extends Controller
 
         return new UserResource($user);
     }
-
 
     /**
      * @OA\Get(
@@ -220,11 +215,6 @@ class UserController extends Controller
      *     description="OK",
      *     @OA\JsonContent(
      *        @OA\Property(property="data", ref="#/components/schemas/User"),
-     *        @OA\Property(
-     *          property="vehicles",
-     *          type="array",
-     *          @OA\Items(ref="#/components/schemas/Vehicle")
-     *        )
      *     )
      *   ),
      *   @OA\Response(
@@ -246,7 +236,7 @@ class UserController extends Controller
     public function show(string $id)
     {
         try {
-            $user = User::find($id);
+            $user = User::with('vehicles')->find($id);
             if (!$user) {
                 return response()->json(['message' => 'Không tìm thấy người dùng'], 404);
             }
@@ -257,10 +247,7 @@ class UserController extends Controller
             ], 500);
         }
 
-        return response()->json([
-            'data' => new UserResource($user),
-            'vehicles' => VehicleResource::collection($user->vehicles ?? []),
-        ]);
+        return new UserResource($user);
     }
 
     /**
@@ -279,10 +266,8 @@ class UserController extends Controller
      *       @OA\Property(property="name", type="string", example="User A"),
      *       @OA\Property(property="email", type="string", example="user@gmail.com"),
      *       @OA\Property(property="phone", type="string", example="0342123564"),
-     *       @OA\Property(property="apartment_code", type="string", example="B-123"),
      *       @OA\Property(property="role", type="string", example="resident"),
-     *       @OA\Property(property="status", type="string", example="rejected"),
-     *       @OA\Property(property="rejected_reason", type="string", example="rejected"),
+     *       @OA\Property(property="is_active", type="boolean", example=true),
      *     )
      *   ),
      *   @OA\Response(
@@ -336,27 +321,18 @@ class UserController extends Controller
             if (!$user) {
                 return response()->json(['message' => 'Không tìm thấy người dùng'], 404);
             }
-            $status = $user->status;
-
-            if ($request->filled('status')) {
-                $status = $data['status'] instanceof AccountStatus
-                    ? $data['status']
-                    : (is_string($data['status']) ? AccountStatus::from($data['status']) : $status);
-            }
 
             $payload = [
                 'name' => $data['name'] ?? $user->name,
                 'email' => $data['email'] ?? $user->email,
                 'phone' => $data['phone'] ?? $user->phone,
-                'apartment_code' => $data['apartment_code'] ?? $user->apartment_code,
             ];
 
             if ($isAdmin) {
                 $payload = [
                     ...$payload,
                     'role' => $data['role'] ?? $user->role,
-                    'status' => $status,
-                    'rejected_reason' => in_array($status, [AccountStatus::APPROVED, AccountStatus::PENDING]) ? null : ($data['rejected_reason'] ?? $user->rejected_reason)
+                    'is_active' => $data['is_active'] ?? $user->is_active,
                 ];
             }
 
@@ -476,5 +452,51 @@ class UserController extends Controller
                 'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
             ], 500);
         }
+    }
+
+    /**
+     * @OA\Put(
+     *   path="/me/fcm-token",
+     *   tags={"FCM"},
+     *   summary="Cập nhật FCM token cho thiết bị hiện tại",
+     *   security={{"bearerAuth":{}}},
+     *   @OA\RequestBody(
+     *     required=true,
+     *     @OA\JsonContent(
+     *       required={"fcm_token"},
+     *       @OA\Property(property="fcm_token", type="string", example="eYQ2...:APA91bH...")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=200,
+     *     description="Cập nhật thành công",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="FCM token updated")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=401,
+     *     description="Chưa xác thực"
+     *   ),
+     *   @OA\Response(
+     *     response=422,
+     *     description="Dữ liệu không hợp lệ"
+     *   )
+     * )
+     */
+    public function updateFcmToken(Request $request)
+    {
+        $data = $request->validate([
+            'fcm_token' => ['required', 'string'],
+        ]);
+
+        $user = auth('api')->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        $user->forceFill(['fcm_token' => $data['fcm_token']])->save();
+
+        return response()->json(['message' => 'FCM token updated']);
     }
 }

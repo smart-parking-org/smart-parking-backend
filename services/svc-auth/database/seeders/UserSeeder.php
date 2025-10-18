@@ -20,7 +20,6 @@ class UserSeeder extends Seeder
             'phone' => '0919999999',
             'password' => '12345678',
             'role' => 'admin',
-            'status' => AccountStatus::APPROVED
         ]);
     }
 }

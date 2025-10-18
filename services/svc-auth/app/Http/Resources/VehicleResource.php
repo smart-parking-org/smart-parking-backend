@@ -16,17 +16,17 @@ class VehicleResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'user' => [
-                'id' => $this->user->id,
-                'name' => $this->user->name,
-                'email' => $this->user->email,
-                'phone' => $this->user->phone
-            ],
-            'type' => [
-                'id' => $this->type->id,
-                'name' => $this->type->name,
-                'code' => $this->type->code,
-            ],
+            'user' => $this->whenLoaded(
+                'user',
+                fn() =>
+                [
+                    'id' => $this->user->id,
+                    'name' => $this->user->name,
+                    'email' => $this->user->email,
+                    'phone' => $this->user->phone
+                ]
+            ),
+            'vehicle_type' => $this->vehicle_type,
             'license_plate' => $this->license_plate,
             'is_primary' => (bool) $this->is_primary,
             'is_active' => (bool) $this->is_active,

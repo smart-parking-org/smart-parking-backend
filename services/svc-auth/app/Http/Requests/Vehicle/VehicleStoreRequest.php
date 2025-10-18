@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Vehicle;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class VehicleStoreRequest extends FormRequest
 {
@@ -24,7 +25,7 @@ class VehicleStoreRequest extends FormRequest
 
         return [
             'user_id' => ['required', 'exists:users,id'],
-            'type_id' => ['required', 'exists:vehicle_types,id'],
+            'vehicle_type' => ['required', Rule::in(['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'])],
             'license_plate' => [
                 'required',
                 'unique:vehicles,license_plate',

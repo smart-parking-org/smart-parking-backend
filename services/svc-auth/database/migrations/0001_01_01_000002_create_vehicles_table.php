@@ -13,7 +13,7 @@ return new class extends Migration {
         Schema::create('vehicles', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
-            $table->foreignId('type_id')->constrained('vehicle_types')->restrictOnDelete();
+            $table->enum('vehicle_type', ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck']);
 
             $table->string('license_plate', 20)->unique();
             $table->boolean('is_primary')->default(false);
@@ -21,6 +21,7 @@ return new class extends Migration {
 
             $table->timestamps();
             $table->index('user_id');
+            $table->index('license_plate');
         });
     }
 

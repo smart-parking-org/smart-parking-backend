@@ -25,7 +25,6 @@ class RegisterRequest extends FormRequest
                 'unique:users,phone',
                 'regex:/^(0|\+84)(3[2-9]|5[2689]|7[0|6-9]|8[1-9]|9[0-9])[0-9]{7}$/'
             ],
-            'apartment_code' => 'bail|required|string|max:50',
         ];
     }
 
@@ -53,12 +52,6 @@ class RegisterRequest extends FormRequest
             'phone.string' => 'Số điện thoại phải là chuỗi ký tự',
             'phone.max' => 'Số điện thoại không hợp lệ',
             'phone.unique' => 'Số điện thoại đã được sử dụng',
-            'phone.regex' => 'Số điện thoại không hợp lệ',
-
-            // Mã căn hộ
-            'apartment_code.required' => 'Vui lòng nhập mã căn hộ',
-            'apartment_code.string' => 'Mã căn hộ phải là chuỗi ký tự',
-            'apartment_code.max' => 'Mã căn hộ không được vượt quá :max ký tự',
         ];
     }
 }
