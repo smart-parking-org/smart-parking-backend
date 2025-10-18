@@ -24,3 +24,11 @@ Route::prefix('slots')->group(function () {
     Route::get('/{id}', [ParkingSlotController::class, 'show']);
     Route::put('/{id}/status', [ParkingSlotController::class, 'updateStatus']);
 });
+
+// Reservations
+Route::prefix('reservations')->group(function () {
+    Route::post('/', [ReservationController::class, 'store']);           // Đặt chỗ
+    Route::get('/{id}', [ReservationController::class, 'show']);        // Chi tiết
+    Route::put('/{id}/extend', [ReservationController::class, 'extend']); // Gia hạn
+    Route::put('/{id}/cancel', [ReservationController::class, 'cancel']); // Hủy
+});
