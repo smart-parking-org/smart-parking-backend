@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\ParkingSlot;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
@@ -14,45 +15,33 @@ class ParkingSlotSeeder extends Seeder
      */
     public function run(): void
     {
+        $now = now();
+        // Tạo slots cho các loại xe
+        $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
+        $slotCounts = [50, 30, 15, 5]; // Số lượng slot cho mỗi loại xe
+        $prefixByType = [
+            'motorbike' => 'MB',
+            'car_4_seat' => 'C4',
+            'car_7_seat' => 'C7',
+            'light_truck' => 'LT',
+        ];
+
         $lotId = DB::table('parking_lots')->value('id'); // lấy 1 bãi đầu tiên
-        if (!$lotId)
-            return;
 
-        $slots = [];
-
-        $makeSlots = function (string $type, int $count, int $startX, int $startY, int $cols, int $gap = 2) use (&$slots, $lotId) {
-            $x = $startX;
-            $y = $startY;
-            for ($i = 1; $i <= $count; $i++) {
-                $slots[] = [
+        foreach ($vehicleTypes as $index => $vehicleType) {
+            $prefix = $prefixByType[$vehicleType];
+            for ($i = 0; $i < $slotCounts[$index]; $i++) {
+                ParkingSlot::create([
                     'parking_lot_id' => $lotId,
-                    'slot_code' => strtoupper($type) . '_' . Str::padLeft((string) $i, 3, '0'),
-                    'vehicle_type' => $type,
+                    'slot_code' => $prefix . '-' . str_pad($i + 1, 3, '0', STR_PAD_LEFT),
+                    'vehicle_type' => $vehicleType,
                     'status' => 'available',
-                    'position_x' => $x,
-                    'position_y' => $y,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
-                // sắp xếp dạng grid
-                if ($i % $cols === 0) {
-                    $x = $startX;
-                    $y += $gap;
-                } else {
-                    $x += $gap;
-                }
+                    'position_x' => rand(1, 10),
+                    'position_y' => rand(1, 10),
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
             }
-        };
-
-        // Số lượng chỗ
-        // Phân bố hợp lý theo diện tích
-        $makeSlots('motorbike', 120, 2, 2, 20);
-        $makeSlots('car_4_seat', 60, 60, 2, 10);
-        $makeSlots('car_7_seat', 20, 60, 20, 10);
-        $makeSlots('light_truck', 5, 80, 30, 5);
-
-        foreach (array_chunk($slots, 205) as $chunk) {
-            DB::table('parking_slots')->insert($chunk);
         }
     }
 }

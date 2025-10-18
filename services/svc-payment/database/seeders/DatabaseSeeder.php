@@ -2,7 +2,6 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
 // use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
@@ -21,14 +20,24 @@ class DatabaseSeeder extends Seeder
         DB::table('reservation_requests')->truncate();
         DB::table('pricing_rules')->truncate();
         DB::table('peak_hours')->truncate();
+        DB::table('reservations')->truncate();
         Schema::enableForeignKeyConstraints();
 
-        $this->call([
-            ParkingLotSeeder::class,
-            ParkingSlotSeeder::class,
-            PricingRuleSeeder::class,
-            PeakHourSeeder::class,
-            ReservationRequestSeeder::class,
-        ]);
+        DB::beginTransaction();
+        try {
+            $this->call([
+                ParkingLotSeeder::class,
+                ParkingSlotSeeder::class,
+                PricingRuleSeeder::class,
+                PeakHourSeeder::class,
+            ]);
+
+            DB::commit();
+            $this->command->info('✅ Seeding hoàn tất (đã COMMIT).');
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            $this->command->error('❌ Seeding lỗi: ' . $e->getMessage());
+            $this->command->warn('Đã ROLLBACK, dữ liệu vẫn đang ở trạng thái trống sau khi truncate.');
+        }
     }
 }

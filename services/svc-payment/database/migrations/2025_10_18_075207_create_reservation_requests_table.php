@@ -13,8 +13,14 @@ return new class extends Migration {
         Schema::create('reservation_requests', function (Blueprint $table) {
             $table->id();
             $table->foreignId('parking_lot_id')->constrained('parking_lots', 'id')->cascadeOnDelete();
+            $table->unsignedBigInteger('user_id')->nullable();
+            $table->unsignedBigInteger('vehicle_id')->nullable();
             $table->enum('vehicle_type', ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck']);
-            $table->enum('status', ['pending', 'processing', 'assigned', 'failed'])->default('pending');
+            $table->timestamp('requested_at')->nullable();
+            $table->decimal('priority_score', 8, 2)->nullable();
+            $table->foreignId('allocated_slot_id')->nullable()->constrained('parking_slots', 'id');
+            $table->integer('processing_time_ms')->nullable();
+            $table->enum('status', ['pending', 'assigned', 'failed'])->default('pending');
             $table->timestamp('processed_at')->nullable();
             $table->timestamps();
         });
