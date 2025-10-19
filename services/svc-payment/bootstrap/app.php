@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\EnsureAccessToken;
 use App\Http\Middleware\EnsureAdmin;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -18,6 +19,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'ensure.access' => EnsureAccessToken::class,
             'ensure.admin' => EnsureAdmin::class,
         ]);
+    })
+    ->withSchedule(function (Schedule $schedule) {
+        $schedule->call(function () {
+            app(\App\Http\Controllers\ReservationController::class)->expireDue();
+        })->everyFiveMinutes();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

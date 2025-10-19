@@ -13,6 +13,7 @@ class Reservation extends Model
         'user_id',
         'vehicle_id',
         'slot_id',
+        'reservation_request_id',
         'reservation_code',
         'status',
         'reserved_at',
@@ -43,6 +44,11 @@ class Reservation extends Model
     public function slot()
     {
         return $this->belongsTo(ParkingSlot::class);
+    }
+
+    public function reservationRequest()
+    {
+        return $this->belongsTo(ReservationRequest::class, 'reservation_request_id');
     }
 
     // Shortcut để lấy biển số (nếu có)

@@ -10,68 +10,35 @@ use Illuminate\Console\Command;
 
 class TestSlotAllocation extends Command
 {
-    protected $signature = 'test:slot-allocation {--algorithm=priority_queue} {--requests=10}';
-    protected $description = 'Test thuật toán cấp chỗ với dữ liệu giả lập';
+    protected $signature = 'test:slot-allocation
+                            {--algorithm=priority_queue : Thuật toán sử dụng}
+                            {--requests=300 : Số lượng requests}
+                            {--peak-ratio=60 : Tỷ lệ giờ cao điểm (%)}';
+
+    protected $description = 'Test thuật toán cấp chỗ với dữ liệu giả lập phân bố giờ cao điểm';
 
     public function handle()
     {
         $algorithm = $this->option('algorithm');
         $numRequests = (int) $this->option('requests');
+        $peakRatio = (int) $this->option('peak-ratio');
 
-        $this->info("Testing {$algorithm} algorithm with {$numRequests} requests...");
+        $algorithmNameMap = [
+            'priority_queue' => 'Priority Queue',
+            'hungarian' => 'Hungarian Algorithm',
+        ];
 
-        // Lấy bãi đỗ xe đầu tiên
-        $parkingLot = ParkingLot::first();
-        if (!$parkingLot) {
-            $this->error('Không tìm thấy bãi đỗ xe nào');
-            return;
-        }
+        $this->info("🧪 Kiểm tra thuật toán " . $algorithmNameMap[$algorithm] . " với {$numRequests} yêu cầu");
+        $this->info("📈 Phân bố giờ cao điểm: {$peakRatio}%");
 
-        $slotAllocationService = app(SlotAllocationService::class);
-        $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
-        $successCount = 0;
-        $totalProcessingTime = 0;
-
-        // Reset tất cả slots về available
-        ParkingSlot::where('parking_lot_id', $parkingLot->id)->update(['status' => 'available']);
-
-        for ($i = 0; $i < $numRequests; $i++) {
-            $vehicleType = $vehicleTypes[array_rand($vehicleTypes)];
-
-            $request = ReservationRequest::create([
-                'parking_lot_id' => $parkingLot->id,
-                'vehicle_type' => $vehicleType,
-                'status' => 'pending',
-                'requested_at' => now()->subMinutes(rand(0, 60))
-            ]);
-
-            $startTime = microtime(true);
-
-            $allocatedSlot = match ($algorithm) {
-                'hungarian' => $slotAllocationService->allocateSlotWithHungarian($request),
-                default => $slotAllocationService->allocateSlotWithPriorityQueue($request)
-            };
-
-            $processingTime = (microtime(true) - $startTime) * 1000;
-            $totalProcessingTime += $processingTime;
-
-            if ($allocatedSlot) {
-                $successCount++;
-                $this->line("Request " . ($i + 1) . ": ✅ Allocated slot {$allocatedSlot->slot_code} ({$processingTime}ms)");
-            } else {
-                $this->line("Request " . ($i + 1) . ": ❌ No slot available ({$processingTime}ms)");
-            }
-        }
-
-        $avgProcessingTime = $totalProcessingTime / $numRequests;
-        $successRate = ($successCount / $numRequests) * 100;
-
-        $this->info("\n📊 Results:");
-        $this->info("Algorithm: {$algorithm}");
-        $this->info("Success Rate: {$successRate}% ({$successCount}/{$numRequests})");
-        $this->info("Average Processing Time: " . round($avgProcessingTime, 2) . "ms");
-
-        // Reset slots
-        ParkingSlot::where('parking_lot_id', $parkingLot->id)->update(['status' => 'available']);
+        // Chạy command tạo dữ liệu
+        $this->call('test:peak-hour-reservations', [
+            '--requests' => $numRequests,
+            '--peak-ratio' => $peakRatio,
+            '--algorithm' => $algorithm
+        ]);
     }
 }
+# So sánh cả 2 thuật toán
+// php artisan test:slot-allocation --algorithm=priority_queue --requests=300 --peak-ratio=60
+// php artisan test:slot-allocation --algorithm=hungarian --requests=300 --peak-ratio=60

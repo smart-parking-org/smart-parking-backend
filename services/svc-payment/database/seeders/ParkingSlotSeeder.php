@@ -18,7 +18,7 @@ class ParkingSlotSeeder extends Seeder
         $now = now();
         // Tạo slots cho các loại xe
         $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
-        $slotCounts = [50, 30, 15, 5]; // Số lượng slot cho mỗi loại xe
+        $slotCounts = [105, 35, 8, 2]; // Số lượng slot cho mỗi loại xe
         $prefixByType = [
             'motorbike' => 'MB',
             'car_4_seat' => 'C4',
@@ -36,8 +36,8 @@ class ParkingSlotSeeder extends Seeder
                     'slot_code' => $prefix . '-' . str_pad($i + 1, 3, '0', STR_PAD_LEFT),
                     'vehicle_type' => $vehicleType,
                     'status' => 'available',
-                    'position_x' => rand(1, 10),
-                    'position_y' => rand(1, 10),
+                    'position_x' => rand(1, 20),
+                    'position_y' => rand(1, 20),
                     'created_at' => $now,
                     'updated_at' => $now,
                 ]);

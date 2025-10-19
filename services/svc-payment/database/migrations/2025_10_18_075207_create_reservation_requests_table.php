@@ -16,11 +16,13 @@ return new class extends Migration {
             $table->unsignedBigInteger('user_id')->nullable();
             $table->unsignedBigInteger('vehicle_id')->nullable();
             $table->enum('vehicle_type', ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck']);
+            $table->timestamp('desired_start_time')->nullable(); // Thời gian bắt đầu mong muốn
+            $table->integer('duration_minutes')->nullable();     // Thời lượng đỗ (phút)
             $table->timestamp('requested_at')->nullable();
             $table->decimal('priority_score', 8, 2)->nullable();
             $table->foreignId('allocated_slot_id')->nullable()->constrained('parking_slots', 'id');
             $table->integer('processing_time_ms')->nullable();
-            $table->enum('status', ['pending', 'assigned', 'failed'])->default('pending');
+            $table->enum('status', ['pending', 'assigned', 'failed', 'cancelled', 'completed'])->default('pending');
             $table->timestamp('processed_at')->nullable();
             $table->timestamps();
         });

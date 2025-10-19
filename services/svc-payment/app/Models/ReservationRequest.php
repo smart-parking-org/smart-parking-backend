@@ -14,19 +14,26 @@ class ReservationRequest extends Model
         'user_id',
         'vehicle_id',
         'vehicle_type',
-        'status',
-        'processed_at',
+        'desired_start_time',
+        'duration_minutes',
+        'requested_at',
         'priority_score',
-        'processed_at',
         'allocated_slot_id',
-        'processing_time_ms'
+        'processed_at',
+        'processing_time_ms',
+        'status',
     ];
 
     protected $casts = [
+        'parking_lot_id' => 'integer',
+        'user_id' => 'integer',
+        'vehicle_id' => 'integer',
         'requested_at' => 'datetime',
         'processed_at' => 'datetime',
         'priority_score' => 'float',
         'processing_time_ms' => 'integer',
+        'desired_start_time' => 'datetime',
+        'duration_minutes' => 'integer',
     ];
 
     public function parkingLot()
@@ -37,6 +44,16 @@ class ReservationRequest extends Model
     public function allocatedSlot()
     {
         return $this->belongsTo(ParkingSlot::class, 'allocated_slot_id');
+    }
+
+    // Accessor để tự động tính end_time
+    public function getDesiredEndTimeAttribute()
+    {
+        if (!$this->desired_start_time || !$this->duration_minutes) {
+            return null;
+        }
+
+        return $this->desired_start_time->copy()->addMinutes($this->duration_minutes);
     }
 
     // Tính điểm ưu tiên dựa trên thời gian đặt và loại xe
@@ -56,19 +73,25 @@ class ReservationRequest extends Model
             default => 50
         };
 
-        return $baseScore - $timePenalty - $vehiclePriority;
+        // Bonus điểm nếu đặt trong giờ cao điểm
+        $peakBonus = $this->isPeakHour() ? 50 : 0;
+
+        return $baseScore - $timePenalty - $vehiclePriority + $peakBonus;
     }
 
     // Kiểm tra có phải giờ cao điểm không
     public function isPeakHour(): bool
     {
-        $now = now();
+        if (!$this->desired_start_time) {
+            return false;
+        }
+
         $peakHours = PeakHour::where('parking_lot_id', $this->parking_lot_id)
             ->where('is_active', true)
             ->get();
 
         foreach ($peakHours as $peakHour) {
-            if ($peakHour->isWithinPeak($now)) {
+            if ($peakHour->isWithinPeak($this->desired_start_time)) {
                 return true;
             }
         }

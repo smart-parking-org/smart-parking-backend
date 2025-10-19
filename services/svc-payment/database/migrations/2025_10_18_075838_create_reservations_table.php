@@ -14,19 +14,19 @@ return new class extends Migration {
             $table->id();
             $table->unsignedBigInteger('user_id')->nullable();
             $table->unsignedBigInteger('vehicle_id')->nullable();
+            $table->foreignId('reservation_request_id')->nullable()->constrained('reservation_requests', 'id')->nullOnDelete();
 
             $table->foreignId('slot_id')->constrained('parking_slots', 'id')->cascadeOnDelete();
             $table->string('reservation_code', 50)->unique();
 
             // Trạng thái
             $table->enum('status', [
-                'pending',      // đã gửi yêu cầu, chưa xác nhận
                 'confirmed',    // đã giữ chỗ thành công
                 'checked_in',   // đã vào bãi
                 'checked_out',  // đã rời bãi
                 'cancelled',    // cư dân hủy
                 'expired'       // quá hạn giữ chỗ
-            ])->default('pending');
+            ]);
 
             // Thời gian xử lý
             $table->timestamp('reserved_at')->nullable();   // lúc xác nhận giữ chỗ

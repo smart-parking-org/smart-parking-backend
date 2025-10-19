@@ -2,11 +2,9 @@
 
 namespace App\Services;
 
+use Carbon\Carbon;
 use App\Models\ParkingSlot;
 use App\Models\ReservationRequest;
-use App\Models\PeakHour;
-use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class SlotAllocationService
@@ -14,7 +12,7 @@ class SlotAllocationService
     /**
      * Thuật toán cấp chỗ - Phương án A: Hàng đợi ưu tiên + tìm chỗ gần nhất
      */
-    public function allocateSlotWithPriorityQueue(ReservationRequest $request): ?ParkingSlot
+    public static function allocateSlotWithPriorityQueue(ReservationRequest $request): ?ParkingSlot
     {
         $startTime = microtime(true);
 
@@ -23,11 +21,16 @@ class SlotAllocationService
             $request->priority_score = $request->calculatePriorityScore();
             $request->save();
 
-            // 2. Tìm slot khả dụng phù hợp với loại xe
-            $availableSlots = ParkingSlot::where('parking_lot_id', $request->parking_lot_id)
-                ->where('vehicle_type', $request->vehicle_type)
-                ->where('status', 'available')
-                ->get();
+            // 2. Tính end_time từ start_time + duration
+            $endTime = $request->desired_start_time->copy()->addMinutes($request->duration_minutes);
+
+            // 3. Tìm slot khả dụng phù hợp với loại xe và thời gian
+            $availableSlots = self::findAvailableSlotsInTimeRange(
+                $request->parking_lot_id,
+                $request->vehicle_type,
+                $request->desired_start_time,
+                $endTime
+            );
 
             if ($availableSlots->isEmpty()) {
                 Log::info("Không có slot khả dụng cho loại xe: {$request->vehicle_type}");
@@ -36,12 +39,13 @@ class SlotAllocationService
 
             // 3. Tìm slot gần nhất với cổng vào
             $parkingLot = $request->parkingLot;
-            $nearestSlot = $this->findNearestSlot($availableSlots, $parkingLot->gate_pos_x, $parkingLot->gate_pos_y);
+            $nearestSlot = self::findNearestSlot(
+                $availableSlots,
+                $parkingLot->gate_pos_x,
+                $parkingLot->gate_pos_y
+            );
 
-            // 4. Cập nhật trạng thái slot
-            $nearestSlot->update(['status' => 'hold']);
-
-            // 5. Ghi log thời gian xử lý
+            // 4. Ghi log thời gian xử lý
             $processingTime = (microtime(true) - $startTime) * 1000;
             $request->update([
                 'allocated_slot_id' => $nearestSlot->id,
@@ -49,7 +53,7 @@ class SlotAllocationService
                 'processed_at' => now()
             ]);
 
-            Log::info("Cấp chỗ thành công", [
+            Log::info("Cấp chỗ thành công với hàng đợi ưu tiên", [
                 'request_id' => $request->id,
                 'slot_id' => $nearestSlot->id,
                 'processing_time_ms' => $processingTime
@@ -58,7 +62,7 @@ class SlotAllocationService
             return $nearestSlot;
 
         } catch (\Exception $e) {
-            Log::error("Lỗi cấp chỗ", [
+            Log::error("Lỗi cấp chỗ hàng đợi ưu tiên", [
                 'request_id' => $request->id,
                 'error' => $e->getMessage()
             ]);
@@ -69,7 +73,7 @@ class SlotAllocationService
     /**
      * Thuật toán cấp chỗ - Phương án B: Hungarian Algorithm (simplified)
      */
-    public function allocateSlotWithHungarian(ReservationRequest $request): ?ParkingSlot
+    public static function allocateSlotWithHungarian(ReservationRequest $request): ?ParkingSlot
     {
         $startTime = microtime(true);
 
@@ -80,34 +84,44 @@ class SlotAllocationService
                 ->orderBy('priority_score', 'desc')
                 ->get();
 
+            // 2. Tính end_time từ start_time + duration
+            $endTime = $request->desired_start_time->copy()->addMinutes($request->duration_minutes);
+
             // 2. Lấy danh sách slots khả dụng
-            $availableSlots = ParkingSlot::where('parking_lot_id', $request->parking_lot_id)
-                ->where('vehicle_type', $request->vehicle_type)
-                ->where('status', 'available')
-                ->get();
+            $availableSlots = self::findAvailableSlotsInTimeRange(
+                $request->parking_lot_id,
+                $request->vehicle_type,
+                $request->desired_start_time,
+                $endTime
+            );
 
             if ($availableSlots->isEmpty()) {
+                Log::info("Không có slot khả dụng cho loại xe: {$request->vehicle_type}");
                 return null;
             }
 
             // 3. Tạo ma trận cost (đơn giản hóa)
-            $costMatrix = $this->buildCostMatrix($pendingRequests, $availableSlots, $request->parkingLot);
+            $costMatrix = self::buildCostMatrix($pendingRequests, $availableSlots, $request->parkingLot);
 
             // 4. Tìm assignment tối ưu
-            $assignment = $this->hungarianAssignment($costMatrix);
+            $assignment = self::hungarianAssignment($costMatrix);
 
             // 5. Cấp chỗ cho request hiện tại
             if (isset($assignment[0]) && $assignment[0] !== -1) {
                 $slotIndex = $assignment[0];
                 $allocatedSlot = $availableSlots[$slotIndex];
 
-                $allocatedSlot->update(['status' => 'hold']);
-
                 $processingTime = (microtime(true) - $startTime) * 1000;
                 $request->update([
                     'allocated_slot_id' => $allocatedSlot->id,
                     'processing_time_ms' => round($processingTime, 2),
                     'processed_at' => now()
+                ]);
+
+                Log::info("Cấp chỗ thành công với Hungarian", [
+                    'request_id' => $request->id,
+                    'slot_id' => $allocatedSlot->id,
+                    'processing_time_ms' => $processingTime
                 ]);
 
                 return $allocatedSlot;
@@ -125,9 +139,34 @@ class SlotAllocationService
     }
 
     /**
+     * Tìm slot khả dụng trong khoảng thời gian
+     */
+    public static function findAvailableSlotsInTimeRange($parkingLotId, $vehicleType, $startTime, $endTime)
+    {
+        $start = $startTime instanceof Carbon ? $startTime : Carbon::parse($startTime);
+        $end = $endTime instanceof Carbon ? $endTime : Carbon::parse($endTime);
+
+        // Lấy tất cả slot phù hợp với loại xe
+        $slots = ParkingSlot::where('parking_lot_id', $parkingLotId)
+            ->where('vehicle_type', $vehicleType)
+            ->where('status', 'available')
+            ->get();
+
+        $availableSlots = collect();
+
+        foreach ($slots as $slot) {
+            if (!TimeOverlapService::hasOverlapOnSlot($slot->id, $start, $end)) {
+                $availableSlots->push($slot);
+            }
+        }
+
+        return $availableSlots;
+    }
+
+    /**
      * Tìm slot gần nhất với điểm cho trước
      */
-    private function findNearestSlot($slots, int $gateX, int $gateY): ParkingSlot
+    private static function findNearestSlot($slots, int $gateX, int $gateY): ParkingSlot
     {
         $minDistance = PHP_FLOAT_MAX;
         $nearestSlot = null;
@@ -150,7 +189,7 @@ class SlotAllocationService
     /**
      * Xây dựng ma trận cost cho Hungarian algorithm
      */
-    private function buildCostMatrix($requests, $slots, $parkingLot): array
+    private static function buildCostMatrix($requests, $slots, $parkingLot): array
     {
         $matrix = [];
 
@@ -174,7 +213,7 @@ class SlotAllocationService
     /**
      * Simplified Hungarian assignment algorithm
      */
-    private function hungarianAssignment(array $costMatrix): array
+    private static function hungarianAssignment(array $costMatrix): array
     {
         $n = count($costMatrix);
         $m = count($costMatrix[0]);
@@ -188,29 +227,5 @@ class SlotAllocationService
         }
 
         return [-1];
-    }
-
-    /**
-     * Kiểm tra xung đột khi cấp chỗ
-     */
-    public function checkConflicts(ReservationRequest $request): array
-    {
-        $conflicts = [];
-
-        // Kiểm tra slot đã được cấp cho request khác
-        $existingAllocation = ReservationRequest::where('allocated_slot_id', $request->allocated_slot_id)
-            ->where('id', '!=', $request->id)
-            ->where('status', 'pending')
-            ->first();
-
-        if ($existingAllocation) {
-            $conflicts[] = [
-                'type' => 'slot_conflict',
-                'message' => "Slot đã được cấp cho request khác",
-                'conflicting_request_id' => $existingAllocation->id
-            ];
-        }
-
-        return $conflicts;
     }
 }
