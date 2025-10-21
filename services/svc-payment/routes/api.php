@@ -13,10 +13,9 @@ Route::prefix('payment')->group(function () {
 // Parking slots
 Route::prefix('parking-lots')->group(function () {
     Route::get('/', [ParkingLotController::class, 'index']);
-    Route::get('/{id}', [ParkingLotController::class, 'show']);
     Route::get('/{id}/slots', [ParkingLotController::class, 'slotMap']);
     Route::get('/{id}/statistics', [ParkingLotController::class, 'statistics']);
-    Route::get('/{id}/availability', [ReservationController::class, 'checkAvailability']);
+    Route::get('/{id}/stream', [ParkingLotController::class, 'stream']);
 });
 
 // Slots
