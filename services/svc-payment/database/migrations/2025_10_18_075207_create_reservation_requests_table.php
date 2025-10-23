@@ -15,14 +15,27 @@ return new class extends Migration {
             $table->foreignId('parking_lot_id')->constrained('parking_lots', 'id')->cascadeOnDelete();
             $table->unsignedBigInteger('user_id')->nullable();
             $table->unsignedBigInteger('vehicle_id')->nullable();
+
+            // Thông tin xe và thời gian
             $table->enum('vehicle_type', ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck']);
             $table->timestamp('desired_start_time')->nullable(); // Thời gian bắt đầu mong muốn
             $table->integer('duration_minutes')->nullable();     // Thời lượng đỗ (phút)
-            $table->timestamp('requested_at')->nullable();
-            $table->decimal('priority_score', 8, 2)->nullable();
+            $table->timestamp('requested_at')->nullable(); // Thời điểm tạo request
+
+            // Kết quả phân bổ
             $table->foreignId('allocated_slot_id')->nullable()->constrained('parking_slots', 'id');
-            $table->integer('processing_time_ms')->nullable();
-            $table->enum('status', ['pending', 'assigned', 'failed', 'cancelled', 'completed'])->default('pending');
+            $table->integer('processing_time_ms')->nullable(); // Thời gian xử lý thuật toán
+            $table->enum(
+                'status',
+                [
+                    'pending', // Chờ xử lý
+                    'assigned',  // Đã cấp chỗ
+                    'failed', // Không cấp được chỗ (xung đột)
+                    'cancelled',  // User hủy
+                    'completed' // Hoàn thành (sau khi check-out)
+                ]
+            )->default('pending');
+
             $table->timestamp('processed_at')->nullable();
             $table->timestamps();
         });

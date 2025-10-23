@@ -6,7 +6,9 @@ use Illuminate\Console\Command;
 
 class CompareAlgorithms extends Command
 {
-    protected $signature = 'test:compare-algorithms {--requests=300} {--peak-ratio=60}';
+    protected $signature = 'test:compare-algorithms
+                            {--requests=300}
+                            {--peak-ratio=60}';
     protected $description = 'So sánh 2 thuật toán để chọn thuật toán tốt nhất';
 
     public function handle()
@@ -14,8 +16,11 @@ class CompareAlgorithms extends Command
         $totalRequests = $this->option('requests');
         $peakRatio = $this->option('peak-ratio');
 
-        $this->info("🔬 SO SÁNH 2 THUẬT TOÁN CẤP CHỖ");
-        $this->info("📊 Dữ liệu: {$totalRequests} requests, {$peakRatio}% giờ cao điểm");
+        $this->info("🔬 BẮT ĐẦU SO SÁNH THUẬT TOÁN");
+        $this->info("═══════════════════════════════════════");
+        $this->info("Tổng requests: {$totalRequests}");
+        $this->info("Giờ cao điểm: {$peakRatio}%");
+        $this->info("");
 
         $results = [];
 

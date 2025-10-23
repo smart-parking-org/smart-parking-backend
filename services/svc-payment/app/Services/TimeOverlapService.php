@@ -11,30 +11,27 @@ class TimeOverlapService
     // Trả về true nếu slot bị bận trong [start, end]
     public static function hasOverlapOnSlot(int $slotId, Carbon $start, Carbon $end): bool
     {
-        $hasRequestConflict = ReservationRequest::where('allocated_slot_id', $slotId)
-            ->where('status', 'assigned')
-            ->where(function ($q) use ($start, $end) {
-                $q->whereBetween('desired_start_time', [$start, $end])
-                    ->orWhereBetween(DB::raw('DATE_ADD(desired_start_time, INTERVAL duration_minutes MINUTE)'), [$start, $end])
-                    ->orWhere(function ($qq) use ($start, $end) {
-                        $qq->where('desired_start_time', '<=', $start)
-                            ->whereRaw('DATE_ADD(desired_start_time, INTERVAL duration_minutes MINUTE) >= ?', [$end]);
-                    });
-            })
-            ->exists();
-
-        $hasReservationConflict = Reservation::where('slot_id', $slotId)
+        $conflict = Reservation::where('slot_id', $slotId)
             ->whereIn('status', ['confirmed', 'checked_in'])
-            ->where(function ($q) use ($start, $end) {
-                $q->whereBetween('reserved_at', [$start, $end])
-                    ->orWhereBetween('expires_at', [$start, $end])
-                    ->orWhere(function ($qq) use ($start, $end) {
-                        $qq->where('reserved_at', '<=', $start)
-                            ->where('expires_at', '>=', $end);
+            ->where(function ($query) use ($start, $end) {
+                $query
+                    // Case 1: Reservation mới bắt đầu trong khoảng đã đặt
+                    ->whereBetween('start_time', [$start, $end])
+                    // Case 2: Reservation mới kết thúc trong khoảng đã đặt
+                    ->orWhereBetween('end_time', [$start, $end])
+                    // Case 3: Reservation mới bao trùm reservation cũ
+                    ->orWhere(function ($q) use ($start, $end) {
+                        $q->where('start_time', '<=', $start)
+                            ->where('end_time', '>=', $end);
+                    })
+                    // Case 4: Reservation cũ bao trùm reservation mới
+                    ->orWhere(function ($q) use ($start, $end) {
+                        $q->where('start_time', '>=', $start)
+                            ->where('end_time', '<=', $end);
                     });
             })
             ->exists();
 
-        return $hasRequestConflict || $hasReservationConflict;
+        return $conflict;
     }
 }

@@ -16,7 +16,8 @@ class Reservation extends Model
         'reservation_request_id',
         'reservation_code',
         'status',
-        'reserved_at',
+        'start_time',
+        'end_time',
         'expires_at',
         'extended_at',
         'check_in_at',
@@ -28,7 +29,8 @@ class Reservation extends Model
     ];
 
     protected $casts = [
-        'reserved_at' => 'datetime',
+        'start_time' => 'datetime',
+        'end_time' => 'datetime',
         'expires_at' => 'datetime',
         'extended_at' => 'datetime',
         'check_in_at' => 'datetime',

@@ -16,10 +16,10 @@ class ParkingSlot extends Model
         'status',
         'position_x',
         'position_y',
+        'distance_from_gate'
     ];
 
-    // Tự append ra JSON
-    protected $appends = ['vehicle_type_label', 'effective_status'];
+    protected $appends = ['effective_status'];
 
     public function parkingLot()
     {
@@ -31,6 +31,11 @@ class ParkingSlot extends Model
         return $this->hasMany(Reservation::class, 'slot_id');
     }
 
+    public function reservationRequests()
+    {
+        return $this->hasMany(ReservationRequest::class, 'allocated_slot_id');
+    }
+
     public function currentReservation()
     {
         return $this->hasOne(Reservation::class, 'slot_id')
@@ -38,43 +43,38 @@ class ParkingSlot extends Model
             ->latest();
     }
 
-    // Lọc slot khả dụng
-    public function scopeAvailable($query)
+    public function scopeWithActiveReservations($query)
     {
-        return $query->where('status', 'available');
-    }
-
-    // kiểu xe tiếng Việt
-    public function getVehicleTypeLabelAttribute(): string
-    {
-        return match ($this->vehicle_type) {
-            'motorbike' => 'Xe máy',
-            'car_4_seat' => 'Ô tô 4 chỗ',
-            'car_7_seat' => 'Ô tô 7 chỗ',
-            'light_truck' => 'Xe tải nhẹ',
-            default => ucfirst($this->vehicle_type),
-        };
+        $now = now();
+        return $query->with([
+            'currentReservation' => function ($query) use ($now) {
+                $query->where('status', 'confirmed')
+                    ->where('start_time', '<=', $now)
+                    ->where('expires_at', '>=', $now);
+            }
+        ]);
     }
 
     // Trạng thái thực tế: nếu có reservation hiện tại → hold, ngược lại dùng status của slot
     public function getEffectiveStatusAttribute(): string
     {
-        // Tránh N+1: nếu đã eager load quan hệ thì chỉ cần check object
-        if ($this->relationLoaded('currentReservation') && $this->currentReservation && $this->currentReservation->status === 'confirmed') {
+        $now = now();
+
+        // Lấy reservation một lần
+        $reservation = $this->currentReservation;
+
+        // Kiểm tra reservation có tồn tại và hợp lệ không
+        if (
+            $reservation &&
+            $reservation->status === 'confirmed' &&
+            $reservation->start_time &&
+            $reservation->expires_at &&
+            $now->between($reservation->start_time, $reservation->expires_at)
+        ) {
             return 'hold';
         }
 
-        // Nếu chưa eager load, kiểm tra nhanh tồn tại reservation
-        if ($this->currentReservation()->exists() && $this->currentReservation->status === 'confirmed') {
-            return 'hold';
-        }
 
         return $this->status;
-    }
-
-    // Kiểm tra slot có đang bị chiếm không
-    public function isOccupied(): bool
-    {
-        return $this->status === 'occupied';
     }
 }

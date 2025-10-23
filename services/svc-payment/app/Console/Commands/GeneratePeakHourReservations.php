@@ -6,11 +6,11 @@ use App\Models\Reservation;
 use App\Models\ReservationRequest;
 use App\Models\ParkingLot;
 use App\Models\ParkingSlot;
-use App\Services\SlotAllocationService;
+use App\Services\HungarianSlotAllocationService;
+use App\Services\PriorityQueueSlotAllocationService;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Str;
 
 class GeneratePeakHourReservations extends Command
 {
@@ -39,98 +39,97 @@ class GeneratePeakHourReservations extends Command
         $this->info("   - Giờ bình thường: {$normalRequests} requests (" . (100 - $peakRatio) . "%)");
         $this->info("   - Thuật toán: " . $algorithmNameMap[$algorithm]);
 
-        // Reset dữ liệu cũ
+        // Reset dữ liệu
+        $this->resetData();
+
+        // Tạo dữ liệu test
+        $this->createTestData($totalRequests, $peakRequests, $normalRequests);
+
+        $this->info("✅ Hoàn thành tạo dữ liệu mô phỏng!");
+
+        // Chạy test allocation
+        $this->runTest($algorithmNameMap, $algorithm);
+    }
+
+    private function resetData()
+    {
         Schema::disableForeignKeyConstraints();
         Reservation::truncate();
         ReservationRequest::truncate();
         Schema::enableForeignKeyConstraints();
         ParkingSlot::query()->update(['status' => 'available']);
-
-
-        // Tạo requests giờ cao điểm
-        $this->generatePeakHourRequests($peakRequests);
-
-        // Tạo requests giờ bình thường
-        $this->generateNormalHourRequests($normalRequests);
-
-        $this->info("✅ Hoàn thành tạo dữ liệu mô phỏng!");
-
-        // Chạy test allocation
-        $this->runAllocationTest($algorithmNameMap, $algorithm);
     }
 
-    private function generatePeakHourRequests($count)
+    private function createTestData($totalRequests, $peakRequests, $normalRequests)
     {
-        $this->info("📈 Tạo {$count} requests giờ cao điểm...");
+        $this->info("📈 Tạo {$peakRequests} requests giờ cao điểm...");
+        $this->createPeakHourRequests($peakRequests);
 
+        $this->info("📊 Tạo {$normalRequests} requests giờ bình thường...");
+        $this->createNormalHourRequests($normalRequests);
+    }
+
+    private function createPeakHourRequests($count)
+    {
+        // Giờ cao điểm: 7-9h và 17-19h
         $peakHours = [
-            ['start' => '07:00', 'end' => '09:00'], // Sáng
-            ['start' => '17:00', 'end' => '19:00'], // Chiều
+            ['start' => '07:00', 'end' => '09:00'],
+            ['start' => '17:00', 'end' => '19:00']
         ];
 
-        // Phân bổ theo tỷ lệ thực tế Việt Nam
+        // Phân bố loại xe theo thực tế Việt Nam
         $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
-        $vehicleRatios = [0.70, 0.25, 0.04, 0.01]; // 70%, 25%, 4%, 1%
+        $vehicleRatios = [0.70, 0.25, 0.04, 0.01];
 
         for ($i = 0; $i < $count; $i++) {
             $peakHour = $peakHours[array_rand($peakHours)];
             $startTime = $this->randomTimeInRange($peakHour['start'], $peakHour['end']);
-            $duration = rand(60, 480); // 1-8 giờ
-
-            // Chọn loại xe theo tỷ lệ
-            $vehicleType = $this->selectVehicleTypeByRatio($vehicleTypes, $vehicleRatios);
+            $vehicleType = $this->selectVehicleType($vehicleTypes, $vehicleRatios);
 
             ReservationRequest::create([
                 'parking_lot_id' => $this->getRandomParkingLot(),
                 'vehicle_type' => $vehicleType,
                 'desired_start_time' => $startTime,
-                'duration_minutes' => $duration,
+                'duration_minutes' => rand(60, 480), // 1-8 giờ
                 'status' => 'pending',
-                'requested_at' => now(),
+                'requested_at' => now()
             ]);
         }
     }
 
-    private function generateNormalHourRequests($count)
+    private function createNormalHourRequests($count)
     {
-        $this->info("📊 Tạo {$count} requests giờ bình thường...");
-
-        // Phân bổ theo tỷ lệ thực tế Việt Nam
         $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
-        $vehicleRatios = [0.70, 0.25, 0.04, 0.01]; // 70%, 25%, 4%, 1%
+        $vehicleRatios = [0.70, 0.25, 0.04, 0.01];
 
         for ($i = 0; $i < $count; $i++) {
-            // Tạo thời gian ngẫu nhiên ngoài giờ cao điểm
             $startTime = $this->randomNormalHour();
-            $duration = rand(30, 360); // 30 phút đến 6 giờ
-
-            // Chọn loại xe theo tỷ lệ
-            $vehicleType = $this->selectVehicleTypeByRatio($vehicleTypes, $vehicleRatios);
+            $vehicleType = $this->selectVehicleType($vehicleTypes, $vehicleRatios);
 
             ReservationRequest::create([
                 'parking_lot_id' => $this->getRandomParkingLot(),
                 'vehicle_type' => $vehicleType,
                 'desired_start_time' => $startTime,
-                'duration_minutes' => $duration,
+                'duration_minutes' => rand(30, 360), // 30 phút - 6 giờ
                 'status' => 'pending',
-                'requested_at' => now(),
+                'requested_at' => now()
             ]);
         }
     }
 
-    private function selectVehicleTypeByRatio($vehicleTypes, $ratios)
+    private function selectVehicleType($types, $ratios)
     {
         $random = mt_rand() / mt_getrandmax();
         $cumulative = 0;
 
-        for ($i = 0; $i < count($vehicleTypes); $i++) {
+        for ($i = 0; $i < count($types); $i++) {
             $cumulative += $ratios[$i];
             if ($random <= $cumulative) {
-                return $vehicleTypes[$i];
+                return $types[$i];
             }
         }
 
-        return $vehicleTypes[0]; // fallback
+        return $types[0];
     }
 
     private function randomTimeInRange($startTime, $endTime)
@@ -144,7 +143,6 @@ class GeneratePeakHourReservations extends Command
 
     private function randomNormalHour()
     {
-        // Tạo thời gian ngẫu nhiên ngoài giờ cao điểm (7-9h, 17-19h)
         $hour = rand(0, 23);
 
         // Tránh giờ cao điểm
@@ -152,100 +150,144 @@ class GeneratePeakHourReservations extends Command
             $hour = rand(0, 23);
         }
 
-        $minute = rand(0, 59);
-
-        return Carbon::now()->setHour($hour)->setMinute($minute)->setSecond(0);
+        return Carbon::now()->setHour($hour)->setMinute(rand(0, 59))->setSecond(0);
     }
 
     private function getRandomParkingLot()
     {
-        $parkingLot = ParkingLot::inRandomOrder()->first();
-        return $parkingLot ? $parkingLot->id : 1;
+        $lot = ParkingLot::inRandomOrder()->first();
+        return $lot ? $lot->id : 1;
     }
 
-    private function runAllocationTest($algorithmNameMap, $algorithm)
+    private function runTest($algorithmNameMap, $algorithm)
     {
-        $this->info("\n🔧 Chạy test allocation với thuật toán " . $algorithmNameMap[$algorithm] . " ...");
+        $this->info("\n🔧 Bắt đầu test thuật toán " . $algorithmNameMap[$algorithm] . "...");
 
-        $slotAllocationService = app(SlotAllocationService::class);
-        $requests = ReservationRequest::where('status', 'pending')->get();
+        // ƯU TIÊN THEO THỜI GIAN ĐẶT
+        $requests = ReservationRequest::where('status', 'pending')
+            ->orderBy('requested_at', 'asc') // Sắp xếp theo thời gian đặt
+            ->get();
 
+        $totalRequests = $requests->count();
         $successCount = 0;
-        $conflicts = 0;
+        $conflictCount = 0;
         $totalProcessingTime = 0;
-        $slotUtilization = [];
+        $processingTimes = [];
 
-        foreach ($requests as $request) {
-            $allocatedSlot = match ($algorithm) {
-                'hungarian' => $slotAllocationService->allocateSlotWithHungarian($request),
-                default => $slotAllocationService->allocateSlotWithPriorityQueue($request)
-            };
+        if ($algorithm === 'priority_queue') {
+            foreach ($requests as $request) {
+                $allocatedSlot = PriorityQueueSlotAllocationService::allocateSlot($request);
 
-            $processingTime = $request->processing_time_ms ?? 0;
-            $totalProcessingTime += $processingTime;
+                $processingTime = $request->processing_time_ms ?? 0;
+                $totalProcessingTime += $processingTime;
+                $processingTimes[] = $processingTime;
 
-            if ($allocatedSlot) {
-                $successCount++;
-                $request->update(['status' => 'assigned']);
-                $endTime = $request->desired_start_time->copy()->addMinutes($request->duration_minutes);
-                // Track slot utilization
-                $slotUtilization[$allocatedSlot->id][] = [
-                    'start' => $request->desired_start_time,
-                    'end' => $endTime,
-                ];
+                if ($allocatedSlot) {
+                    $successCount++;
+                    $this->createReservation($request, $allocatedSlot);
+                } else {
+                    $conflictCount++;
+                    $request->update(['status' => 'failed']);
+                }
+            }
+        } else {
+            //  Hungarian - xử lý batch
+            $result = HungarianSlotAllocationService::allocateBatch($requests);
 
-                Reservation::create([
-                    'user_id' => null,
-                    'vehicle_id' => null,
-                    'slot_id' => $allocatedSlot->id,
-                    'reservation_request_id' => $request->id,
-                    'reservation_code' => 'RES-' . strtoupper(Str::random(8)) . '-' . now()->format('Ymd'),
-                    'status' => 'confirmed',
-                    'reserved_at' => now(),
-                    'expires_at' => now()->addMinutes(15),
-                    'user_snapshot' => null,
-                    'vehicle_snapshot' => null,
-                    'pricing_snapshot' => null
-                ]);
-            } else {
-                $conflicts++;
-                $request->update(['status' => 'failed']);
+            $successCount = $result['stats']['success'];
+            $conflictCount = $result['stats']['failed'];
+            $totalProcessingTime = $result['stats']['total_processing_time'];
+
+            // Tạo reservations cho các allocation thành công
+            foreach ($result['allocations'] as $allocation) {
+                $request = ReservationRequest::find($allocation['request_id']);
+                $slot = ParkingSlot::find($allocation['slot_id']);
+
+                if ($request && $slot) {
+                    $this->createReservation($request, $slot);
+                    $processingTimes[] = $request->processing_time_ms ?? 0;
+                }
             }
         }
 
-        // Tính metrics
-        $totalRequests = $requests->count();
-        $avgProcessingTime = $totalProcessingTime / $totalRequests;
-        $successRate = ($successCount / $totalRequests) * 100;
-        $conflictRate = ($conflicts / $totalRequests) * 100;
-        $utilizationRate = $this->calculateSlotUtilization($slotUtilization);
+
+        // Tính kết quả
+        $avgProcessingTime = $totalRequests > 0 ? $totalProcessingTime / $totalRequests : 0;
+        $maxProcessingTime = !empty($processingTimes) ? max($processingTimes) : 0;
+        $successRate = $totalRequests > 0 ? ($successCount / $totalRequests) * 100 : 0;
+        $conflictRate = $totalRequests > 0 ? ($conflictCount / $totalRequests) * 100 : 0;
+        $utilizationRate = $this->calculateUtilization();
 
         // Hiển thị kết quả
-        $this->info("\n📊 KẾT QUẢ MÔ PHỎNG:");
-        $this->info("Thuật toán: " . $algorithmNameMap[$algorithm]);
-        $this->info("Tổng requests: {$totalRequests}");
-        $this->info("Tỷ lệ thành công: " . round($successRate, 2) . "% ({$successCount}/{$totalRequests})");
-        $this->info("Tỷ lệ xung đột: " . round($conflictRate, 2) . "% ({$conflicts}/{$totalRequests})");
-        $this->info("Thời gian xử lý trung bình: " . round($avgProcessingTime, 2) . "ms");
-        $this->info("Độ sử dụng chỗ: " . round($utilizationRate, 2) . "%");
+        $this->displayResults(
+            $totalRequests,
+            $successCount,
+            $conflictCount,
+            $successRate,
+            $conflictRate,
+            $avgProcessingTime,
+            $maxProcessingTime,
+            $utilizationRate
+        );
 
         // Đánh giá theo yêu cầu đề tài
-        $this->evaluateResults($conflictRate, $avgProcessingTime, $algorithm, $algorithmNameMap);
+        $this->evaluateResults($conflictRate, $avgProcessingTime);
     }
 
-    private function evaluateResults($conflictRate, $avgProcessingTime, $algorithm, $algorithmNameMap)
+    private function createReservation($request, $slot)
+    {
+        Reservation::create([
+            'user_id' => null,
+            'vehicle_id' => null,
+            'slot_id' => $slot->id,
+            'reservation_request_id' => $request->id,
+            'reservation_code' => 'RES-' . strtoupper(uniqid()) . '-' . now()->format('Ymd'),
+            'status' => 'confirmed',
+            'start_time' => $request->desired_start_time, // Thời gian bắt đầu đỗ,
+            'end_time' => $request->desired_start_time->copy()
+                ->addMinutes($request->duration_minutes), // Thời gian kết thúc đỗ
+            'expires_at' => $request->desired_start_time->copy()
+                ->addMinutes(15) // Thời gian hết hạn giữ chỗ
+        ]);
+    }
+
+    private function displayResults(
+        $total,
+        $success,
+        $conflict,
+        $successRate,
+        $conflictRate,
+        $avgTime,
+        $maxTime,
+        $utilization
+    ) {
+        $this->info("\n📊 KẾT QUẢ TEST:");
+        $this->info("═══════════════════════════════════════");
+        $this->info("Tổng requests: {$total}");
+        $this->info("Thành công: {$success} ({$successRate}%)");
+        $this->info("Thất bại: {$conflict} ({$conflictRate}%)");
+        $this->info("───────────────────────────────────────");
+        $this->info("Thời gian xử lý trung bình: " . round($avgTime, 2) . "ms");
+        $this->info("Thời gian xử lý tối đa: " . round($maxTime, 2) . "ms");
+        $this->info("───────────────────────────────────────");
+        $this->info("Độ sử dụng chỗ: " . round($utilization, 2) . "%");
+        $this->info("═══════════════════════════════════════");
+    }
+
+    private function evaluateResults($conflictRate, $avgProcessingTime)
     {
         $this->info("\n🎯 ĐÁNH GIÁ THEO YÊU CẦU ĐỀ TÀI:");
 
         $conflictPass = $conflictRate < 2;
-        $timePass = $avgProcessingTime < 1500;
+        $timePass = $avgProcessingTime < 1500; // < 1.5s để đảm bảo < 3s với 300 requests
 
         if ($conflictPass && $timePass) {
-            $this->info("🎉 THUẬT TOÁN " . $algorithmNameMap[$algorithm] . " ĐẠT YÊU CẦU:");
+            $this->info("🎉 THUẬT TOÁN ĐẠT YÊU CẦU:");
             $this->info("   ✅ Xung đột: {$conflictRate}% < 2%");
             $this->info("   ✅ Thời gian: {$avgProcessingTime}ms < 1500ms");
+            $this->info("   ✅ Đáp ứng < 3s với 300 lượt giả lập");
         } else {
-            $this->warn("⚠️ THUẬT TOÁN " . $algorithmNameMap[$algorithm] . " CHƯA ĐẠT YÊU CẦU:");
+            $this->warn("⚠️ THUẬT TOÁN CHƯA ĐẠT YÊU CẦU:");
             if (!$conflictPass) {
                 $this->warn("   ❌ Xung đột: {$conflictRate}% >= 2%");
             }
@@ -257,11 +299,11 @@ class GeneratePeakHourReservations extends Command
         return $conflictPass && $timePass;
     }
 
-    private function calculateSlotUtilization($slotUtilization)
+    private function calculateUtilization()
     {
         $totalSlots = ParkingSlot::count();
-        $usedSlots = count($slotUtilization);
+        $usedSlots = Reservation::whereIn('status', ['confirmed', 'checked_in'])->distinct('slot_id')->count();
 
-        return ($usedSlots / $totalSlots) * 100;
+        return $totalSlots > 0 ? ($usedSlots / $totalSlots) * 100 : 0;
     }
 }

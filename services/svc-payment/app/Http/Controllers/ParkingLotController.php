@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ParkingLot;
 use App\Models\ParkingSlot;
+use App\Models\Reservation;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -59,10 +60,8 @@ class ParkingLotController extends Controller
         }
 
         $slots = ParkingSlot::where('parking_lot_id', $id)
-            ->with('currentReservation') // để effective_status tính chính xác, tránh N+1
-            ->select('id', 'slot_code', 'vehicle_type', 'status', 'position_x', 'position_y', 'updated_at')
-            ->orderBy('position_x')
-            ->orderBy('position_y')
+            ->withActiveReservations()
+            ->select('id', 'slot_code', 'vehicle_type', 'status')
             ->get();
 
         $summary = [
@@ -128,43 +127,39 @@ class ParkingLotController extends Controller
      */
     public function statistics($id)
     {
-        $parkingLot = ParkingLot::find($id);
+        $lot = ParkingLot::find($id);
 
-        if (!$parkingLot) {
+        if (!$lot) {
             return response()->json(['message' => 'Không tìm thấy bãi đỗ xe'], 404);
         }
 
-        // Tổng quan
-        $slots = ParkingSlot::where('parking_lot_id', $id)->get();
+        $slots = ParkingSlot::where('parking_lot_id', $id)
+            ->withActiveReservations()
+            ->select('vehicle_type', 'status')
+            ->get();
 
         $summary = [
             'total' => $slots->count(),
-            'available' => $slots->where('status', 'available')->count(),
-            'hold' => $slots->where('status', 'hold')->count(),
-            'occupied' => $slots->where('status', 'occupied')->count(),
+            'available' => $slots->where('effective_status', 'available')->count(),
+            'hold' => $slots->where('effective_status', 'hold')->count(),
+            'occupied' => $slots->where('effective_status', 'occupied')->count(),
         ];
 
-        $summary['utilization_rate'] = $summary['total'] > 0
-            ? round(($summary['occupied'] + $summary['hold']) / $summary['total'] * 100, 2)
-            : 0;
-
-        // Thống kê theo loại xe
         $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
         $byVehicleType = [];
-
         foreach ($vehicleTypes as $type) {
             $typeSlots = $slots->where('vehicle_type', $type);
             $byVehicleType[$type] = [
                 'total' => $typeSlots->count(),
-                'available' => $typeSlots->where('status', 'available')->count(),
-                'hold' => $typeSlots->where('status', 'hold')->count(),
-                'occupied' => $typeSlots->where('status', 'occupied')->count(),
+                'available' => $typeSlots->where('effective_status', 'available')->count(),
+                'hold' => $typeSlots->where('effective_status', 'hold')->count(),
+                'occupied' => $typeSlots->where('effective_status', 'occupied')->count(),
             ];
         }
 
         return response()->json([
-            'parking_lot_id' => $parkingLot->id,
-            'parking_lot_name' => $parkingLot->name,
+            'parking_lot_id' => $lot->id,
+            'parking_lot_name' => $lot->name,
             'summary' => $summary,
             'by_vehicle_type' => $byVehicleType,
             'last_updated' => now()->toIso8601String(),
@@ -192,7 +187,7 @@ class ParkingLotController extends Controller
             return response()->json(['message' => 'Không tìm thấy bãi xe'], 404);
         }
 
-        $response = new StreamedResponse(function () use ($id) {
+        $response = new StreamedResponse(function () use ($lot) {
             @set_time_limit(0);
             @ignore_user_abort(true);
 
@@ -201,7 +196,8 @@ class ParkingLotController extends Controller
             @ob_flush();
             @flush();
 
-            $lastData = null; // Lưu data lần trước để so sánh
+            $lastHash = null;
+            $keepAliveCount = 0;
 
             // Chạy 30 phút (1800 lần * 2s = 3600s)
             for ($i = 0; $i < 1800; $i++) {
@@ -210,36 +206,72 @@ class ParkingLotController extends Controller
                 }
 
                 // Query DB
-                $slots = ParkingSlot::where('parking_lot_id', $id)
-                    ->with('currentReservation')
-                    ->select('id', 'slot_code', 'vehicle_type', 'status', 'position_x', 'position_y', 'updated_at')
-                    ->orderBy('position_x')
-                    ->orderBy('position_y')
+                $slots = ParkingSlot::where('parking_lot_id', $lot->id)
+                    ->withActiveReservations()
+                    ->select('id', 'slot_code', 'vehicle_type', 'status')
+                    ->orderBy('id')
                     ->get();
 
-                $payload = [
-                    'type' => 'slot_snapshot',
-                    'parking_lot_id' => (int) $id,
-                    'slots' => $slots,
-                    'server_time' => now()->toIso8601String(),
+                $summary = [
+                    'total' => $slots->count(),
+                    'available' => $slots->where('effective_status', 'available')->count(),
+                    'hold' => $slots->where('effective_status', 'hold')->count(),
+                    'occupied' => $slots->where('effective_status', 'occupied')->count(),
                 ];
 
-                // Chỉ gửi khi có thay đổi (tối ưu bandwidth)
-                $currentData = json_encode($payload);
-                if ($currentData !== $lastData) {
-                    echo "event: message\n";
-                    echo 'data: ' . $currentData . "\n\n";
-                    @ob_flush();
-                    @flush();
-                    $lastData = $currentData;
-                } else {
-                    // Chỉ gửi keep-alive khi không có thay đổi
-                    echo ": keepalive\n\n";
-                    @ob_flush();
-                    @flush();
+                $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
+                $byVehicleType = [];
+                foreach ($vehicleTypes as $type) {
+                    $typeSlots = $slots->where('vehicle_type', $type);
+                    $byVehicleType[$type] = [
+                        'total' => $typeSlots->count(),
+                        'available' => $typeSlots->where('effective_status', 'available')->count(),
+                        'hold' => $typeSlots->where('effective_status', 'hold')->count(),
+                        'occupied' => $typeSlots->where('effective_status', 'occupied')->count(),
+                    ];
                 }
 
-                usleep(2000000); // 2s thay vì 1s (giảm tải DB)
+                // Tạo hash từ dữ liệu quan trọng thay vì serialize toàn bộ
+                $dataHash = md5(json_encode([
+                    'summary' => $summary,
+                    'by_vehicle_type' => $byVehicleType,
+                    'slots_status' => $slots->pluck('effective_status', 'id')->toArray()
+                ]));
+                if ($dataHash !== $lastHash) {
+                    $payload = [
+                        'type' => 'slot_snapshot',
+                        'parking_lot' => [
+                            'id' => $lot->id,
+                            'name' => $lot->name,
+                            'gate_pos_x' => $lot->gate_pos_x,
+                            'gate_pos_y' => $lot->gate_pos_y
+                        ],
+                        'slots' => $slots->toArray(), // Convert to array để đảm bảo consistency
+                        'summary' => $summary,
+                        'by_vehicle_type' => $byVehicleType,
+                        'timestamp' => now()->timestamp,
+                        'lasted_updated' => now()->toIso8601String()
+                    ];
+
+                    echo "event: message\n";
+                    echo 'data: ' . json_encode($payload) . "\n\n";
+                    @ob_flush();
+                    @flush();
+
+                    $lastHash = $dataHash;
+                    $keepAliveCount = 0;
+                } else {
+                    // Gửi keepalive mỗi 10 lần (20 giây) để duy trì connection
+                    $keepAliveCount++;
+                    if ($keepAliveCount >= 10) {
+                        echo ": keepalive\n\n";
+                        @ob_flush();
+                        @flush();
+                        $keepAliveCount = 0;
+                    }
+                }
+
+                usleep(2000000); // 2s (giảm tải DB)
             }
         });
 

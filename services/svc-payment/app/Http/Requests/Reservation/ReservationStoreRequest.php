@@ -23,10 +23,8 @@ class ReservationStoreRequest extends FormRequest
             'parking_lot_id' => 'required|integer|exists:parking_lots,id',
             'user_id' => 'required|integer',
             'vehicle_id' => 'required|integer',
-            'vehicle_type' => 'required|string|in:motorbike,car_4_seat,car_7_seat,light_truck',
             'desired_start_time' => 'required|date|after_or_equal:now',
             'duration_minutes' => 'required|integer|min:30|max:1440',
-            'algorithm' => 'nullable|string|in:priority_queue,hungarian',
         ];
     }
 
@@ -45,7 +43,6 @@ class ReservationStoreRequest extends FormRequest
             'duration_minutes.required' => 'Vui lòng chọn thời lượng đỗ',
             'duration_minutes.min' => 'Thời lượng đỗ tối thiểu 30 phút',
             'duration_minutes.max' => 'Thời lượng đỗ tối đa 24 giờ',
-            'algorithm.in' => 'Thuật toán không hợp lệ',
         ];
     }
 
@@ -59,7 +56,6 @@ class ReservationStoreRequest extends FormRequest
             'vehicle_type' => 'loại xe',
             'desired_start_time' => 'thời gian bắt đầu',
             'duration_minutes' => 'thời lượng đỗ',
-            'algorithm' => 'thuật toán',
         ];
     }
 }

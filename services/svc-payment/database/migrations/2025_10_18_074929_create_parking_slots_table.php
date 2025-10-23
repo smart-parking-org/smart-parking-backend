@@ -16,9 +16,9 @@ return new class extends Migration {
             $table->string('slot_code')->unique();
             $table->enum('vehicle_type', ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck']);
             $table->enum('status', ['available', 'occupied'])->default('available');
-            $table->integer('position_x');
-            $table->integer('position_y');
-
+            $table->decimal('position_x', 18, 15);
+            $table->decimal('position_y', 18, 15);
+            $table->decimal('distance_from_gate', 10, 2);
             $table->timestamps();
         });
     }
