@@ -12,6 +12,2668 @@
         }
     ],
     "paths": {
+        "/parking-lots": {
+            "get": {
+                "tags": [
+                    "🏢 Parking Lots"
+                ],
+                "summary": "Lấy danh sách tất cả bãi đỗ xe",
+                "description": "Trả về danh sách các bãi đỗ với thông tin cơ bản và vị trí",
+                "operationId": "8f7ed1e3ea0e23b0ef7c335337ae5668",
+                "responses": {
+                    "200": {
+                        "description": "Danh sách bãi đỗ xe",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/ParkingLot"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/parking-lots/{id}/slots": {
+            "get": {
+                "tags": [
+                    "🏢 Parking Lots"
+                ],
+                "summary": "Lấy danh sách chỗ đỗ trong một bãi cụ thể",
+                "description": "Trả về danh sách tất cả slots trong bãi với thông tin chi tiết",
+                "operationId": "7ad86962d1b9d22af0caf9679f941f87",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID bãi đỗ xe",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách chỗ đỗ trong bãi",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/ParkingSlot"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy bãi xe",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Không tìm thấy bãi xe"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/parking-lots/{id}/statistics": {
+            "get": {
+                "tags": [
+                    "🏢 Parking Lots"
+                ],
+                "summary": "Lấy thống kê chi tiết của bãi đỗ xe",
+                "description": "Trả về thống kê tổng quan và theo loại xe của bãi đỗ",
+                "operationId": "060ab1c407a055629b48502f4e113218",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của bãi đỗ xe",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Thống kê chi tiết bãi đỗ xe",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ParkingLotStatistics"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy bãi xe",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Không tìm thấy bãi xe"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/parking-lots/{id}/stream": {
+            "get": {
+                "tags": [
+                    "🏢 Parking Lots"
+                ],
+                "summary": "Stream trạng thái slot theo thời gian thực",
+                "description": "Server-Sent Events để cập nhật trạng thái slot liên tục",
+                "operationId": "71318d34ccbac7a19905d0a921d4854c",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID bãi đỗ xe",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Event stream",
+                        "content": {
+                            "text/event-stream": {}
+                        }
+                    }
+                }
+            }
+        },
+        "/slots": {
+            "get": {
+                "tags": [
+                    "🅿️ Parking Slots"
+                ],
+                "summary": "Lấy danh sách tất cả chỗ đỗ xe",
+                "description": "Có thể lọc theo bãi, loại xe hoặc trạng thái.",
+                "operationId": "10c6e49bc0c24fa85f5c9551c7605f97",
+                "parameters": [
+                    {
+                        "name": "parking_lot_id",
+                        "in": "query",
+                        "description": "ID bãi đỗ xe",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "vehicle_type",
+                        "in": "query",
+                        "description": "Loại xe",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "motorbike",
+                                "car_4_seat",
+                                "car_7_seat",
+                                "light_truck"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Trạng thái",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "available",
+                                "hold",
+                                "occupied"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách chỗ đỗ xe",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/ParkingSlot"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/slots/{id}": {
+            "get": {
+                "tags": [
+                    "🅿️ Parking Slots"
+                ],
+                "summary": "Lấy chi tiết một chỗ đỗ xe",
+                "operationId": "acadece1cc7879e1a53ebaf534f705ec",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của chỗ đỗ xe",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết chỗ đỗ",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ParkingSlot"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy chỗ đỗ xe"
+                    }
+                }
+            }
+        },
+        "/slots/{id}/status": {
+            "put": {
+                "tags": [
+                    "🅿️ Parking Slots"
+                ],
+                "summary": "Cập nhật trạng thái của chỗ đỗ xe (phục vụ mô phỏng hoặc xử lý thủ công)",
+                "operationId": "41c08beb7ed72170b00c6ad82152cd3e",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID chỗ đỗ xe",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "status"
+                                ],
+                                "properties": {
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "available",
+                                            "hold",
+                                            "occupied"
+                                        ],
+                                        "example": "occupied"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Cập nhật trạng thái thành công"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Dữ liệu không hợp lệ",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationError"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy chỗ đỗ xe",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Không tìm thấy chỗ đỗ xe"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/peak-hours": {
+            "get": {
+                "tags": [
+                    "Peak Hours"
+                ],
+                "summary": "Lấy danh sách giờ cao điểm",
+                "description": "Lấy danh sách tất cả giờ cao điểm theo bãi đỗ xe",
+                "operationId": "ceeffe194519b8b844c0b05fec7e29ac",
+                "parameters": [
+                    {
+                        "name": "parking_lot_id",
+                        "in": "query",
+                        "description": "ID bãi đỗ xe",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "day_of_week",
+                        "in": "query",
+                        "description": "Ngày trong tuần (1-7, 1=Thứ 2)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 7,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách giờ cao điểm",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "properties": {
+                                            "id": {
+                                                "type": "integer",
+                                                "example": 1
+                                            },
+                                            "parking_lot_id": {
+                                                "type": "integer",
+                                                "example": 1
+                                            },
+                                            "day_of_week": {
+                                                "type": "integer",
+                                                "example": 1
+                                            },
+                                            "start_time": {
+                                                "type": "string",
+                                                "example": "07:00:00"
+                                            },
+                                            "end_time": {
+                                                "type": "string",
+                                                "example": "09:00:00"
+                                            },
+                                            "is_active": {
+                                                "type": "boolean",
+                                                "example": true
+                                            },
+                                            "created_at": {
+                                                "type": "string",
+                                                "format": "datetime"
+                                            },
+                                            "updated_at": {
+                                                "type": "string",
+                                                "format": "datetime"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Peak Hours"
+                ],
+                "summary": "Tạo giờ cao điểm mới",
+                "description": "Tạo một giờ cao điểm mới cho bãi đỗ xe",
+                "operationId": "37021049a2a0d309d2d167e1a54ca13b",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "parking_lot_id",
+                                    "day_of_week",
+                                    "start_time",
+                                    "end_time"
+                                ],
+                                "properties": {
+                                    "parking_lot_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "day_of_week": {
+                                        "description": "1=Thứ 2, 2=Thứ 3, ..., 7=Chủ nhật",
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "start_time": {
+                                        "type": "string",
+                                        "example": "07:00:00"
+                                    },
+                                    "end_time": {
+                                        "type": "string",
+                                        "example": "09:00:00"
+                                    },
+                                    "is_active": {
+                                        "type": "boolean",
+                                        "example": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Tạo giờ cao điểm thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Tạo giờ cao điểm thành công"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Dữ liệu không hợp lệ"
+                    }
+                }
+            }
+        },
+        "/peak-hours/{id}": {
+            "get": {
+                "tags": [
+                    "Peak Hours"
+                ],
+                "summary": "Lấy chi tiết giờ cao điểm",
+                "description": "Lấy thông tin chi tiết của một giờ cao điểm",
+                "operationId": "75ea0399158d058a8ce2ec252421a05b",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID giờ cao điểm",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết giờ cao điểm",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "parking_lot_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "day_of_week": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "start_time": {
+                                                    "type": "string",
+                                                    "example": "07:00:00"
+                                                },
+                                                "end_time": {
+                                                    "type": "string",
+                                                    "example": "09:00:00"
+                                                },
+                                                "is_active": {
+                                                    "type": "boolean",
+                                                    "example": true
+                                                },
+                                                "parking_lot": {
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy giờ cao điểm"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "Peak Hours"
+                ],
+                "summary": "Cập nhật giờ cao điểm",
+                "description": "Cập nhật thông tin của một giờ cao điểm",
+                "operationId": "22f7c4a12f283db81f6f96fe569e6b3f",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID giờ cao điểm",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "day_of_week": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "start_time": {
+                                        "type": "string",
+                                        "example": "08:00:00"
+                                    },
+                                    "end_time": {
+                                        "type": "string",
+                                        "example": "10:00:00"
+                                    },
+                                    "is_active": {
+                                        "type": "boolean",
+                                        "example": false
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật giờ cao điểm thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Cập nhật giờ cao điểm thành công"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy giờ cao điểm"
+                    },
+                    "422": {
+                        "description": "Dữ liệu không hợp lệ"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Peak Hours"
+                ],
+                "summary": "Xóa giờ cao điểm",
+                "description": "Xóa một giờ cao điểm",
+                "operationId": "61841862a123b9766ad454e2bd1c30cc",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID giờ cao điểm",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Xóa giờ cao điểm thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Xóa giờ cao điểm thành công"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy giờ cao điểm"
+                    }
+                }
+            }
+        },
+        "/peak-hours/by-parking-lot/{parkingLotId}": {
+            "get": {
+                "tags": [
+                    "Peak Hours"
+                ],
+                "summary": "Lấy giờ cao điểm theo bãi đỗ xe",
+                "description": "Lấy tất cả giờ cao điểm của một bãi đỗ xe",
+                "operationId": "819698f4bc4d7bd7c41fdc28e7cf77e7",
+                "parameters": [
+                    {
+                        "name": "parkingLotId",
+                        "in": "path",
+                        "description": "ID bãi đỗ xe",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách giờ cao điểm theo bãi đỗ xe",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/peak-hours/check/{parkingLotId}": {
+            "get": {
+                "tags": [
+                    "Peak Hours"
+                ],
+                "summary": "Kiểm tra giờ cao điểm",
+                "description": "Kiểm tra xem một thời điểm có phải giờ cao điểm không",
+                "operationId": "4372ed137697bbd47e494961f1974203",
+                "parameters": [
+                    {
+                        "name": "parkingLotId",
+                        "in": "path",
+                        "description": "ID bãi đỗ xe",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "datetime",
+                        "in": "query",
+                        "description": "Thời điểm cần kiểm tra (Y-m-d H:i:s)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "datetime"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Kết quả kiểm tra giờ cao điểm",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "is_peak_hour": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "peak_hour_info": {
+                                            "type": "object",
+                                            "nullable": true
+                                        },
+                                        "checked_datetime": {
+                                            "type": "string",
+                                            "format": "datetime"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pricing-rules": {
+            "get": {
+                "tags": [
+                    "Pricing Rules"
+                ],
+                "summary": "Lấy danh sách bảng giá",
+                "description": "Lấy danh sách tất cả bảng giá theo bãi đỗ xe và loại xe",
+                "operationId": "4127299580770a6397c9dbd001e14399",
+                "parameters": [
+                    {
+                        "name": "parking_lot_id",
+                        "in": "query",
+                        "description": "ID bãi đỗ xe",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "vehicle_type",
+                        "in": "query",
+                        "description": "Loại xe (motorbike, car_4_seat, car_7_seat, light_truck)",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách bảng giá",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "properties": {
+                                            "id": {
+                                                "type": "integer",
+                                                "example": 1
+                                            },
+                                            "parking_lot_id": {
+                                                "type": "integer",
+                                                "example": 1
+                                            },
+                                            "vehicle_type": {
+                                                "type": "string",
+                                                "example": "car_4_seat"
+                                            },
+                                            "hourly": {
+                                                "type": "number",
+                                                "example": 10000
+                                            },
+                                            "daily_cap": {
+                                                "type": "number",
+                                                "example": 100000
+                                            },
+                                            "monthly_pass": {
+                                                "type": "number",
+                                                "example": 600000
+                                            },
+                                            "peak_enabled": {
+                                                "type": "boolean",
+                                                "example": true
+                                            },
+                                            "peak_multiplier": {
+                                                "type": "number",
+                                                "example": 1.5
+                                            },
+                                            "created_at": {
+                                                "type": "string",
+                                                "format": "datetime"
+                                            },
+                                            "updated_at": {
+                                                "type": "string",
+                                                "format": "datetime"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Pricing Rules"
+                ],
+                "summary": "Tạo bảng giá mới",
+                "description": "Tạo một bảng giá mới cho bãi đỗ xe và loại xe",
+                "operationId": "c3fe3567d99ba84ef6503bee88a27a79",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "parking_lot_id",
+                                    "vehicle_type",
+                                    "hourly"
+                                ],
+                                "properties": {
+                                    "parking_lot_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "vehicle_type": {
+                                        "type": "string",
+                                        "example": "car_4_seat"
+                                    },
+                                    "hourly": {
+                                        "type": "number",
+                                        "example": 10000
+                                    },
+                                    "daily_cap": {
+                                        "type": "number",
+                                        "example": 100000
+                                    },
+                                    "monthly_pass": {
+                                        "type": "number",
+                                        "example": 600000
+                                    },
+                                    "peak_enabled": {
+                                        "type": "boolean",
+                                        "example": true
+                                    },
+                                    "peak_multiplier": {
+                                        "type": "number",
+                                        "example": 1.5
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Tạo bảng giá thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Tạo bảng giá thành công"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Dữ liệu không hợp lệ"
+                    }
+                }
+            }
+        },
+        "/pricing-rules/{id}": {
+            "get": {
+                "tags": [
+                    "Pricing Rules"
+                ],
+                "summary": "Lấy chi tiết bảng giá",
+                "description": "Lấy thông tin chi tiết của một bảng giá",
+                "operationId": "c084bea530c4b2281629b1eb31808fcf",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID bảng giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết bảng giá",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "parking_lot_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "vehicle_type": {
+                                                    "type": "string",
+                                                    "example": "car_4_seat"
+                                                },
+                                                "hourly": {
+                                                    "type": "number",
+                                                    "example": 10000
+                                                },
+                                                "daily_cap": {
+                                                    "type": "number",
+                                                    "example": 100000
+                                                },
+                                                "monthly_pass": {
+                                                    "type": "number",
+                                                    "example": 600000
+                                                },
+                                                "peak_enabled": {
+                                                    "type": "boolean",
+                                                    "example": true
+                                                },
+                                                "peak_multiplier": {
+                                                    "type": "number",
+                                                    "example": 1.5
+                                                },
+                                                "parking_lot": {
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy bảng giá"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "Pricing Rules"
+                ],
+                "summary": "Cập nhật bảng giá",
+                "description": "Cập nhật thông tin của một bảng giá",
+                "operationId": "cc1845349009481c5ae9fef3770d7e45",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID bảng giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "hourly": {
+                                        "type": "number",
+                                        "example": 12000
+                                    },
+                                    "daily_cap": {
+                                        "type": "number",
+                                        "example": 120000
+                                    },
+                                    "monthly_pass": {
+                                        "type": "number",
+                                        "example": 720000
+                                    },
+                                    "peak_enabled": {
+                                        "type": "boolean",
+                                        "example": true
+                                    },
+                                    "peak_multiplier": {
+                                        "type": "number",
+                                        "example": 1.8
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật bảng giá thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Cập nhật bảng giá thành công"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy bảng giá"
+                    },
+                    "422": {
+                        "description": "Dữ liệu không hợp lệ"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Pricing Rules"
+                ],
+                "summary": "Xóa bảng giá",
+                "description": "Xóa một bảng giá",
+                "operationId": "813ee145aaba3342109d5ad3eb917b00",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID bảng giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Xóa bảng giá thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Xóa bảng giá thành công"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy bảng giá"
+                    }
+                }
+            }
+        },
+        "/pricing-rules/by-parking-lot/{parkingLotId}": {
+            "get": {
+                "tags": [
+                    "Pricing Rules"
+                ],
+                "summary": "Lấy bảng giá theo bãi đỗ xe",
+                "description": "Lấy tất cả bảng giá của một bãi đỗ xe",
+                "operationId": "885ffa1c10f18e4e9504238d78ff25b8",
+                "parameters": [
+                    {
+                        "name": "parkingLotId",
+                        "in": "path",
+                        "description": "ID bãi đỗ xe",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách bảng giá theo bãi đỗ xe",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/reservations": {
+            "get": {
+                "tags": [
+                    "🎫 Reservations"
+                ],
+                "summary": "Danh sách reservations với filter",
+                "description": "Lấy danh sách reservations với các filter: user_id, vehicle_type, status, date_range. Hỗ trợ pagination.",
+                "operationId": "69fb15b9890a0559eb50e5e1777d9b64",
+                "parameters": [
+                    {
+                        "name": "user_id",
+                        "in": "query",
+                        "description": "Filter theo user ID",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "vehicle_type",
+                        "in": "query",
+                        "description": "Filter theo loại xe",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "motorbike",
+                                "car_4_seat",
+                                "car_7_seat",
+                                "light_truck"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Filter theo trạng thái",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "confirmed",
+                                "checked_in",
+                                "checked_out",
+                                "cancelled",
+                                "expired"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "parking_lot_id",
+                        "in": "query",
+                        "description": "Filter theo bãi đỗ",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "date_from",
+                        "in": "query",
+                        "description": "Từ ngày (ISO 8601)",
+                        "schema": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "name": "date_to",
+                        "in": "query",
+                        "description": "Đến ngày (ISO 8601)",
+                        "schema": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Trang hiện tại",
+                        "schema": {
+                            "type": "integer",
+                            "default": 1
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "description": "Số bản ghi mỗi trang",
+                        "schema": {
+                            "type": "integer",
+                            "default": 15
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách reservations",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "reservations": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "integer",
+                                                                "example": 101
+                                                            },
+                                                            "reservation_code": {
+                                                                "type": "string",
+                                                                "example": "RES-AB12CD34-20251019"
+                                                            },
+                                                            "status": {
+                                                                "type": "string",
+                                                                "example": "checked_in"
+                                                            },
+                                                            "plate": {
+                                                                "type": "string",
+                                                                "example": "29A-12345"
+                                                            },
+                                                            "reserved_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            },
+                                                            "check_in_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            },
+                                                            "check_out_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            },
+                                                            "duration_minutes": {
+                                                                "type": "integer",
+                                                                "example": 150
+                                                            },
+                                                            "slot": {
+                                                                "properties": {
+                                                                    "slot_code": {
+                                                                        "type": "string",
+                                                                        "example": "C4-012"
+                                                                    },
+                                                                    "vehicle_type": {
+                                                                        "type": "string",
+                                                                        "example": "car_4_seat"
+                                                                    }
+                                                                },
+                                                                "type": "object"
+                                                            },
+                                                            "user_snapshot": {
+                                                                "properties": {
+                                                                    "name": {
+                                                                        "type": "string",
+                                                                        "example": "Nguyễn Văn A"
+                                                                    },
+                                                                    "phone": {
+                                                                        "type": "string",
+                                                                        "example": "0123456789"
+                                                                    }
+                                                                },
+                                                                "type": "object"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "pagination": {
+                                                    "properties": {
+                                                        "current_page": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "per_page": {
+                                                            "type": "integer",
+                                                            "example": 15
+                                                        },
+                                                        "total": {
+                                                            "type": "integer",
+                                                            "example": 45
+                                                        },
+                                                        "last_page": {
+                                                            "type": "integer",
+                                                            "example": 3
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "summary": {
+                                                    "properties": {
+                                                        "total_reservations": {
+                                                            "type": "integer",
+                                                            "example": 45
+                                                        },
+                                                        "confirmed": {
+                                                            "type": "integer",
+                                                            "example": 12
+                                                        },
+                                                        "checked_in": {
+                                                            "type": "integer",
+                                                            "example": 8
+                                                        },
+                                                        "checked_out": {
+                                                            "type": "integer",
+                                                            "example": 20
+                                                        },
+                                                        "cancelled": {
+                                                            "type": "integer",
+                                                            "example": 3
+                                                        },
+                                                        "expired": {
+                                                            "type": "integer",
+                                                            "example": 2
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "🎫 Reservations"
+                ],
+                "summary": "Đặt chỗ với thuật toán cấp chỗ tự động",
+                "description": "Yêu cầu các trường: parking_lot_id, user_id, vehicle_id, vehicle_type, desired_start_time, duration_minutes. Thuật toán mặc định priority_queue.",
+                "operationId": "1aabc7d432cc652e63cfc3fb514132cd",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "parking_lot_id",
+                                    "user_id",
+                                    "vehicle_id",
+                                    "vehicle_type",
+                                    "desired_start_time",
+                                    "duration_minutes"
+                                ],
+                                "properties": {
+                                    "parking_lot_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "user_id": {
+                                        "type": "integer",
+                                        "example": 2
+                                    },
+                                    "vehicle_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "desired_start_time": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "example": "2025-10-22T17:12:00.000000Z"
+                                    },
+                                    "duration_minutes": {
+                                        "type": "integer",
+                                        "maximum": 1440,
+                                        "minimum": 30,
+                                        "example": 120
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Đặt chỗ thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Đặt chỗ thành công"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "reservation": {
+                                                    "description": "Bản ghi reservation đã tạo",
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "user_id": {
+                                                            "type": "integer",
+                                                            "example": 2
+                                                        },
+                                                        "vehicle_id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "slot_id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "reservation_request_id": {
+                                                            "type": "integer",
+                                                            "example": 2
+                                                        },
+                                                        "reservation_code": {
+                                                            "type": "string",
+                                                            "example": "RES-TDZKIUQ9-20251022"
+                                                        },
+                                                        "status": {
+                                                            "type": "string",
+                                                            "example": "confirmed"
+                                                        },
+                                                        "start_time": {
+                                                            "type": "string",
+                                                            "format": "date-time",
+                                                            "example": "2025-10-22T17:12:00.000000Z"
+                                                        },
+                                                        "end_time": {
+                                                            "type": "string",
+                                                            "format": "date-time",
+                                                            "example": "2025-10-22T19:12:00.000000Z"
+                                                        },
+                                                        "expires_at": {
+                                                            "type": "string",
+                                                            "format": "date-time",
+                                                            "example": "2025-10-22T17:27:00.000000Z"
+                                                        },
+                                                        "created_at": {
+                                                            "type": "string",
+                                                            "format": "date-time",
+                                                            "example": "2025-10-22T17:11:10.000000Z"
+                                                        },
+                                                        "updated_at": {
+                                                            "type": "string",
+                                                            "format": "date-time",
+                                                            "example": "2025-10-22T17:11:10.000000Z"
+                                                        },
+                                                        "user_snapshot": {
+                                                            "properties": {
+                                                                "id": {
+                                                                    "type": "integer",
+                                                                    "example": 2
+                                                                },
+                                                                "name": {
+                                                                    "type": "string",
+                                                                    "example": "Trần Hoàng Kha"
+                                                                },
+                                                                "email": {
+                                                                    "type": "string",
+                                                                    "example": "khath2004@gmail.com"
+                                                                },
+                                                                "phone": {
+                                                                    "type": "string",
+                                                                    "example": "0342123564"
+                                                                }
+                                                            },
+                                                            "type": "object"
+                                                        },
+                                                        "vehicle_snapshot": {
+                                                            "properties": {
+                                                                "id": {
+                                                                    "type": "integer",
+                                                                    "example": 1
+                                                                },
+                                                                "license_plate": {
+                                                                    "type": "string",
+                                                                    "example": "94K-123.45"
+                                                                },
+                                                                "vehicle_type": {
+                                                                    "type": "string",
+                                                                    "example": "motorbike"
+                                                                }
+                                                            },
+                                                            "type": "object"
+                                                        },
+                                                        "pricing_snapshot": {
+                                                            "properties": {
+                                                                "id": {
+                                                                    "type": "integer",
+                                                                    "example": 1
+                                                                },
+                                                                "parking_lot_id": {
+                                                                    "type": "integer",
+                                                                    "example": 1
+                                                                },
+                                                                "vehicle_type": {
+                                                                    "type": "string",
+                                                                    "example": "motorbike"
+                                                                },
+                                                                "hourly": {
+                                                                    "type": "integer",
+                                                                    "example": 5000
+                                                                },
+                                                                "rounding_minutes": {
+                                                                    "type": "integer",
+                                                                    "example": 30
+                                                                },
+                                                                "daily_cap": {
+                                                                    "type": "integer",
+                                                                    "example": 50000
+                                                                },
+                                                                "monthly_pass": {
+                                                                    "type": "integer",
+                                                                    "example": 300000
+                                                                },
+                                                                "peak_enabled": {
+                                                                    "type": "boolean",
+                                                                    "example": true
+                                                                },
+                                                                "peak_multiplier": {
+                                                                    "type": "number",
+                                                                    "example": 1.5
+                                                                },
+                                                                "created_at": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": "2025-10-22T17:09:59.000000Z"
+                                                                },
+                                                                "updated_at": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": "2025-10-22T17:09:59.000000Z"
+                                                                }
+                                                            },
+                                                            "type": "object"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "allocated_slot": {
+                                                    "description": "Chỗ được cấp",
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "parking_lot_id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "slot_code": {
+                                                            "type": "string",
+                                                            "example": "MB-001"
+                                                        },
+                                                        "vehicle_type": {
+                                                            "type": "string",
+                                                            "example": "motorbike"
+                                                        },
+                                                        "status": {
+                                                            "type": "string",
+                                                            "example": "available"
+                                                        },
+                                                        "position_x": {
+                                                            "type": "string",
+                                                            "example": "10.806176400733000"
+                                                        },
+                                                        "position_y": {
+                                                            "type": "string",
+                                                            "example": "106.628667651080000"
+                                                        },
+                                                        "distance_from_gate": {
+                                                            "type": "string",
+                                                            "example": "0.00"
+                                                        },
+                                                        "created_at": {
+                                                            "type": "string",
+                                                            "format": "date-time",
+                                                            "example": "2025-10-22T17:09:59.000000Z"
+                                                        },
+                                                        "updated_at": {
+                                                            "type": "string",
+                                                            "format": "date-time",
+                                                            "example": "2025-10-22T17:09:59.000000Z"
+                                                        },
+                                                        "effective_status": {
+                                                            "type": "string",
+                                                            "example": "available"
+                                                        },
+                                                        "current_reservation": {
+                                                            "description": "Reservation hiện tại của slot",
+                                                            "properties": {
+                                                                "id": {
+                                                                    "type": "integer",
+                                                                    "example": 1
+                                                                },
+                                                                "user_id": {
+                                                                    "type": "integer",
+                                                                    "example": 2
+                                                                },
+                                                                "vehicle_id": {
+                                                                    "type": "integer",
+                                                                    "example": 1
+                                                                },
+                                                                "reservation_request_id": {
+                                                                    "type": "integer",
+                                                                    "example": 2
+                                                                },
+                                                                "slot_id": {
+                                                                    "type": "integer",
+                                                                    "example": 1
+                                                                },
+                                                                "reservation_code": {
+                                                                    "type": "string",
+                                                                    "example": "RES-TDZKIUQ9-20251022"
+                                                                },
+                                                                "status": {
+                                                                    "type": "string",
+                                                                    "example": "confirmed"
+                                                                },
+                                                                "start_time": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": "2025-10-22T17:12:00.000000Z"
+                                                                },
+                                                                "end_time": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": "2025-10-22T19:12:00.000000Z"
+                                                                },
+                                                                "expires_at": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": "2025-10-22T17:27:00.000000Z"
+                                                                },
+                                                                "extended_at": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": null
+                                                                },
+                                                                "check_in_at": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": null
+                                                                },
+                                                                "check_out_at": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": null
+                                                                },
+                                                                "cancelled_at": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": null
+                                                                },
+                                                                "created_at": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": "2025-10-22T17:11:10.000000Z"
+                                                                },
+                                                                "updated_at": {
+                                                                    "type": "string",
+                                                                    "format": "date-time",
+                                                                    "example": "2025-10-22T17:11:10.000000Z"
+                                                                },
+                                                                "user_snapshot": {
+                                                                    "properties": {
+                                                                        "id": {
+                                                                            "type": "integer",
+                                                                            "example": 2
+                                                                        },
+                                                                        "name": {
+                                                                            "type": "string",
+                                                                            "example": "Nguyễn Văn A"
+                                                                        },
+                                                                        "email": {
+                                                                            "type": "string",
+                                                                            "example": "nguyevana@gmail.com"
+                                                                        },
+                                                                        "phone": {
+                                                                            "type": "string",
+                                                                            "example": "0342123564"
+                                                                        }
+                                                                    },
+                                                                    "type": "object"
+                                                                },
+                                                                "vehicle_snapshot": {
+                                                                    "properties": {
+                                                                        "id": {
+                                                                            "type": "integer",
+                                                                            "example": 1
+                                                                        },
+                                                                        "vehicle_type": {
+                                                                            "type": "string",
+                                                                            "example": "motorbike"
+                                                                        },
+                                                                        "license_plate": {
+                                                                            "type": "string",
+                                                                            "example": "94K-123.45"
+                                                                        }
+                                                                    },
+                                                                    "type": "object"
+                                                                },
+                                                                "pricing_snapshot": {
+                                                                    "properties": {
+                                                                        "id": {
+                                                                            "type": "integer",
+                                                                            "example": 1
+                                                                        },
+                                                                        "hourly": {
+                                                                            "type": "integer",
+                                                                            "example": 5000
+                                                                        },
+                                                                        "daily_cap": {
+                                                                            "type": "integer",
+                                                                            "example": 50000
+                                                                        },
+                                                                        "created_at": {
+                                                                            "type": "string",
+                                                                            "format": "date-time",
+                                                                            "example": "2025-10-22T17:09:59.000000Z"
+                                                                        },
+                                                                        "updated_at": {
+                                                                            "type": "string",
+                                                                            "format": "date-time",
+                                                                            "example": "2025-10-22T17:09:59.000000Z"
+                                                                        },
+                                                                        "monthly_pass": {
+                                                                            "type": "integer",
+                                                                            "example": 300000
+                                                                        },
+                                                                        "peak_enabled": {
+                                                                            "type": "boolean",
+                                                                            "example": true
+                                                                        },
+                                                                        "vehicle_type": {
+                                                                            "type": "string",
+                                                                            "example": "motorbike"
+                                                                        },
+                                                                        "parking_lot_id": {
+                                                                            "type": "integer",
+                                                                            "example": 1
+                                                                        },
+                                                                        "peak_multiplier": {
+                                                                            "type": "number",
+                                                                            "example": 1.5
+                                                                        },
+                                                                        "rounding_minutes": {
+                                                                            "type": "integer",
+                                                                            "example": 30
+                                                                        }
+                                                                    },
+                                                                    "type": "object"
+                                                                }
+                                                            },
+                                                            "type": "object"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "algorithm_used": {
+                                                    "type": "string",
+                                                    "example": "priority_queue"
+                                                },
+                                                "processing_time_ms": {
+                                                    "type": "integer",
+                                                    "example": 302
+                                                },
+                                                "qr_payload": {
+                                                    "type": "string",
+                                                    "example": "RES-TDZKIUQ9-20251022"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Dữ liệu không hợp lệ hoặc không có chỗ trống",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Không có chỗ trống phù hợp với loại xe này"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/reservations/{id}/extend": {
+            "put": {
+                "tags": [
+                    "🎫 Reservations"
+                ],
+                "summary": "Gia hạn giữ chỗ thêm 15 phút (chỉ 1 lần)",
+                "description": "Chỉ áp dụng khi reservation đang confirmed, chưa hết hạn và chưa gia hạn trước đó.",
+                "operationId": "1c711d6e98c1fecddc4587c9df9d1166",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của reservation",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Gia hạn thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Gia hạn thành công"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "reservation": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 101
+                                                        },
+                                                        "status": {
+                                                            "type": "string",
+                                                            "example": "confirmed"
+                                                        },
+                                                        "expires_at": {
+                                                            "type": "string",
+                                                            "format": "date-time",
+                                                            "example": "2025-10-19T14:45:00Z"
+                                                        },
+                                                        "extended_at": {
+                                                            "type": "string",
+                                                            "format": "date-time",
+                                                            "example": "2025-10-19T14:30:00Z"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "new_expires_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-19T14:45:00Z"
+                                                },
+                                                "extended_minutes": {
+                                                    "type": "integer",
+                                                    "example": 15
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Không thể gia hạn (không đúng trạng thái / đã gia hạn / đã hết hạn)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Reservation đã hết hạn, không thể gia hạn"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy reservation"
+                    }
+                }
+            }
+        },
+        "/reservations/{id}/cancel": {
+            "put": {
+                "tags": [
+                    "🎫 Reservations"
+                ],
+                "summary": "Hủy đặt chỗ khi đang confirmed",
+                "description": "Chỉ cho phép hủy khi reservation đang confirmed. Sau khi hủy, slot vẫn available (trừ khi đang occupied do lệch trạng thái).",
+                "operationId": "d25591dfddbd12dd86d9120c36a92731",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của reservation",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Hủy thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Hủy đặt chỗ thành công"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 101
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "cancelled"
+                                                },
+                                                "cancelled_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-19T13:05:00Z"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Không thể hủy do không đúng trạng thái",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Chỉ có thể hủy khi reservation đang confirmed"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy reservation"
+                    }
+                }
+            }
+        },
+        "/reservations/{id}": {
+            "get": {
+                "tags": [
+                    "🎫 Reservations"
+                ],
+                "summary": "Chi tiết đặt chỗ đầy đủ",
+                "description": "Lấy thông tin chi tiết reservation bao gồm slot, parking lot, reservation request và snapshots.",
+                "operationId": "4472ee4ed670cd72b7969d6e32473b92",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của reservation",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết reservation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 101
+                                                },
+                                                "reservation_code": {
+                                                    "type": "string",
+                                                    "example": "RES-AB12CD34-20251019"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "checked_in"
+                                                },
+                                                "reserved_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-19T14:30:00Z"
+                                                },
+                                                "expires_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-19T14:45:00Z"
+                                                },
+                                                "extended_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-19T14:35:00Z"
+                                                },
+                                                "check_in_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-19T15:00:00Z"
+                                                },
+                                                "check_out_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-19T17:30:00Z"
+                                                },
+                                                "cancelled_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": null
+                                                },
+                                                "plate": {
+                                                    "type": "string",
+                                                    "example": "29A-12345"
+                                                },
+                                                "duration_minutes": {
+                                                    "type": "integer",
+                                                    "example": 150
+                                                },
+                                                "is_active": {
+                                                    "type": "boolean",
+                                                    "example": true
+                                                },
+                                                "slot": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 55
+                                                        },
+                                                        "slot_code": {
+                                                            "type": "string",
+                                                            "example": "C4-012"
+                                                        },
+                                                        "vehicle_type": {
+                                                            "type": "string",
+                                                            "example": "car_4_seat"
+                                                        },
+                                                        "position_x": {
+                                                            "type": "integer",
+                                                            "example": 10
+                                                        },
+                                                        "position_y": {
+                                                            "type": "integer",
+                                                            "example": 5
+                                                        },
+                                                        "status": {
+                                                            "type": "string",
+                                                            "example": "occupied"
+                                                        },
+                                                        "parking_lot": {
+                                                            "properties": {
+                                                                "id": {
+                                                                    "type": "integer",
+                                                                    "example": 1
+                                                                },
+                                                                "name": {
+                                                                    "type": "string",
+                                                                    "example": "B1 Basement"
+                                                                },
+                                                                "gate_pos_x": {
+                                                                    "type": "integer",
+                                                                    "example": 0
+                                                                },
+                                                                "gate_pos_y": {
+                                                                    "type": "integer",
+                                                                    "example": 0
+                                                                }
+                                                            },
+                                                            "type": "object"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "reservation_request": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 2001
+                                                        },
+                                                        "desired_start_time": {
+                                                            "type": "string",
+                                                            "format": "date-time",
+                                                            "example": "2025-10-19T15:00:00Z"
+                                                        },
+                                                        "duration_minutes": {
+                                                            "type": "integer",
+                                                            "example": 120
+                                                        },
+                                                        "status": {
+                                                            "type": "string",
+                                                            "example": "assigned"
+                                                        },
+                                                        "priority_score": {
+                                                            "type": "number",
+                                                            "example": 950.5
+                                                        },
+                                                        "processing_time_ms": {
+                                                            "type": "number",
+                                                            "example": 12.35
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "user_snapshot": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 12
+                                                        },
+                                                        "name": {
+                                                            "type": "string",
+                                                            "example": "Nguyễn Văn A"
+                                                        },
+                                                        "email": {
+                                                            "type": "string",
+                                                            "example": "user@example.com"
+                                                        },
+                                                        "phone": {
+                                                            "type": "string",
+                                                            "example": "0123456789"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "vehicle_snapshot": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 34
+                                                        },
+                                                        "plate": {
+                                                            "type": "string",
+                                                            "example": "29A-12345"
+                                                        },
+                                                        "type": {
+                                                            "type": "string",
+                                                            "example": "motorbike"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "pricing_snapshot": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "vehicle_type": {
+                                                            "type": "string",
+                                                            "example": "car_4_seat"
+                                                        },
+                                                        "base_price_per_hour": {
+                                                            "type": "number",
+                                                            "example": 5000
+                                                        },
+                                                        "peak_hour_multiplier": {
+                                                            "type": "number",
+                                                            "example": 1.5
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy reservation"
+                    }
+                }
+            }
+        },
+        "/reservations/{id}/check-in": {
+            "put": {
+                "tags": [
+                    "🎫 Reservations"
+                ],
+                "summary": "Check-in vào bãi đỗ",
+                "description": "Chuyển reservation từ confirmed sang checked_in. Slot sẽ chuyển sang occupied. Chỉ áp dụng khi reservation đang confirmed.",
+                "operationId": "c955f02a6e4cdf8ba629852f91aad54c",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của reservation",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Check-in thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Check-in thành công"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 101
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "checked_in"
+                                                },
+                                                "check_in_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-19T15:30:00Z"
+                                                },
+                                                "slot_id": {
+                                                    "type": "integer",
+                                                    "example": 55
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Không thể check-in do không đúng trạng thái",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Chỉ có thể check-in reservation đang confirmed"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy reservation"
+                    }
+                }
+            }
+        },
+        "/reservations/{id}/check-out": {
+            "put": {
+                "tags": [
+                    "🎫 Reservations"
+                ],
+                "summary": "Check-out khỏi bãi đỗ",
+                "description": "Chuyển reservation từ checked_in sang checked_out. Slot sẽ chuyển về available và ReservationRequest được đóng.",
+                "operationId": "0fa19e1baeaf2eb468e7d65c7d33a810",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của reservation",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Check-out thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Check-out thành công"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 101
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "checked_out"
+                                                },
+                                                "check_in_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-19T15:30:00Z"
+                                                },
+                                                "check_out_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-19T17:45:00Z"
+                                                },
+                                                "slot_id": {
+                                                    "type": "integer",
+                                                    "example": 55
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Không thể check-out do không đúng trạng thái",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Chỉ có thể check-out reservation đang checked_in"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy reservation"
+                    }
+                }
+            }
+        },
+        "/demo/check-in": {
+            "post": {
+                "tags": [
+                    "🎫 Reservations"
+                ],
+                "summary": "Demo check-in bằng reservation_code",
+                "description": "Check-in bằng reservation_code thay vì ID, dễ demo hơn.",
+                "operationId": "9e6247500a8bcef2d7f81c99ce7311fd",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "reservation_code"
+                                ],
+                                "properties": {
+                                    "reservation_code": {
+                                        "type": "string",
+                                        "example": "RES-AB12CD34-20251019"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Check-in thành công"
+                    },
+                    "404": {
+                        "description": "Không tìm thấy reservation"
+                    },
+                    "422": {
+                        "description": "Không thể check-in"
+                    }
+                }
+            }
+        },
+        "/demo/check-out": {
+            "post": {
+                "tags": [
+                    "🎫 Reservations"
+                ],
+                "summary": "Demo check-out bằng reservation_code",
+                "description": "Check-out bằng reservation_code thay vì ID, dễ demo hơn.",
+                "operationId": "a6af46054dd32543abda785873e3996f",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "reservation_code"
+                                ],
+                                "properties": {
+                                    "reservation_code": {
+                                        "type": "string",
+                                        "example": "RES-AB12CD34-20251019"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Check-out thành công"
+                    },
+                    "404": {
+                        "description": "Không tìm thấy reservation"
+                    },
+                    "422": {
+                        "description": "Không thể check-out"
+                    }
+                }
+            }
+        },
+        "/reservations/expire-due": {
+            "post": {
+                "tags": [
+                    "🎫 Reservations"
+                ],
+                "summary": "Tự động hết hạn reservations quá hạn",
+                "description": "Hết hạn tất cả reservations đã quá hạn giữ chỗ. Chạy tự động bằng schedule.",
+                "operationId": "56fb2b8c6434927f021ece1b6ca9b3c7",
+                "responses": {
+                    "200": {
+                        "description": "Hết hạn thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Đã hết hạn 5 reservations"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "expired_count": {
+                                                    "type": "integer",
+                                                    "example": 5
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/payment/ping": {
             "get": {
                 "tags": [
@@ -42,6 +2704,476 @@
         }
     },
     "components": {
+        "schemas": {
+            "ParkingLot": {
+                "title": "Parking Lot",
+                "description": "Thông tin cơ bản của một bãi đỗ xe",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "Tầng hầm B1"
+                    },
+                    "gate_pos_x": {
+                        "type": "integer",
+                        "example": 10
+                    },
+                    "gate_pos_y": {
+                        "type": "integer",
+                        "example": 20
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2025-10-18T09:00:00Z"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2025-10-18T09:00:00Z"
+                    }
+                },
+                "type": "object"
+            },
+            "ParkingLotStatistics": {
+                "title": "Parking Lot Statistics",
+                "description": "Thống kê chi tiết bãi đỗ xe",
+                "properties": {
+                    "parking_lot_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "parking_lot_name": {
+                        "type": "string",
+                        "example": "Tầng hầm B1"
+                    },
+                    "summary": {
+                        "properties": {
+                            "total": {
+                                "type": "integer",
+                                "example": 100
+                            },
+                            "available": {
+                                "type": "integer",
+                                "example": 45
+                            },
+                            "hold": {
+                                "type": "integer",
+                                "example": 15
+                            },
+                            "occupied": {
+                                "type": "integer",
+                                "example": 40
+                            },
+                            "utilization_rate": {
+                                "type": "number",
+                                "example": 55
+                            }
+                        },
+                        "type": "object"
+                    },
+                    "by_vehicle_type": {
+                        "properties": {
+                            "motorbike": {
+                                "properties": {
+                                    "total": {
+                                        "type": "integer",
+                                        "example": 50
+                                    },
+                                    "available": {
+                                        "type": "integer",
+                                        "example": 25
+                                    },
+                                    "hold": {
+                                        "type": "integer",
+                                        "example": 10
+                                    },
+                                    "occupied": {
+                                        "type": "integer",
+                                        "example": 15
+                                    }
+                                },
+                                "type": "object"
+                            },
+                            "car_4_seat": {
+                                "properties": {
+                                    "total": {
+                                        "type": "integer",
+                                        "example": 30
+                                    },
+                                    "available": {
+                                        "type": "integer",
+                                        "example": 15
+                                    },
+                                    "hold": {
+                                        "type": "integer",
+                                        "example": 5
+                                    },
+                                    "occupied": {
+                                        "type": "integer",
+                                        "example": 10
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        },
+                        "type": "object"
+                    },
+                    "last_updated": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2025-10-18T09:00:00Z"
+                    }
+                },
+                "type": "object"
+            },
+            "ParkingSlot": {
+                "title": "Parking Slot",
+                "description": "Thông tin một chỗ đỗ trong bãi xe",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "slot_code": {
+                        "type": "string",
+                        "example": "B1-001"
+                    },
+                    "vehicle_type": {
+                        "type": "string",
+                        "example": "motorbike"
+                    },
+                    "status": {
+                        "type": "string",
+                        "example": "available"
+                    },
+                    "position_x": {
+                        "type": "integer",
+                        "example": 5
+                    },
+                    "position_y": {
+                        "type": "integer",
+                        "example": 8
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2025-10-18T09:00:00Z"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2025-10-18T09:00:00Z"
+                    }
+                },
+                "type": "object"
+            },
+            "PeakHour": {
+                "title": "Peak Hour",
+                "description": "Giờ cao điểm cho bãi đỗ xe",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "parking_lot_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "day_of_week": {
+                        "description": "1=Thứ 2, 2=Thứ 3, ..., 7=Chủ nhật",
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "start_time": {
+                        "description": "Thời gian bắt đầu (HH:mm:ss)",
+                        "type": "string",
+                        "example": "07:00:00"
+                    },
+                    "end_time": {
+                        "description": "Thời gian kết thúc (HH:mm:ss)",
+                        "type": "string",
+                        "example": "09:00:00"
+                    },
+                    "is_active": {
+                        "description": "Có đang hoạt động không",
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "datetime",
+                        "example": "2024-01-01T00:00:00.000000Z"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "datetime",
+                        "example": "2024-01-01T00:00:00.000000Z"
+                    },
+                    "parking_lot": {
+                        "$ref": "#/components/schemas/ParkingLot"
+                    }
+                },
+                "type": "object"
+            },
+            "PeakHourRequest": {
+                "title": "Peak Hour Request",
+                "description": "Dữ liệu tạo giờ cao điểm",
+                "required": [
+                    "parking_lot_id",
+                    "day_of_week",
+                    "start_time",
+                    "end_time"
+                ],
+                "properties": {
+                    "parking_lot_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "day_of_week": {
+                        "description": "1=Thứ 2, 2=Thứ 3, ..., 7=Chủ nhật",
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "start_time": {
+                        "description": "Thời gian bắt đầu (HH:mm:ss)",
+                        "type": "string",
+                        "example": "07:00:00"
+                    },
+                    "end_time": {
+                        "description": "Thời gian kết thúc (HH:mm:ss)",
+                        "type": "string",
+                        "example": "09:00:00"
+                    },
+                    "is_active": {
+                        "type": "boolean",
+                        "example": true
+                    }
+                },
+                "type": "object"
+            },
+            "PeakHourUpdateRequest": {
+                "title": "Peak Hour Update Request",
+                "description": "Dữ liệu cập nhật giờ cao điểm",
+                "properties": {
+                    "day_of_week": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "example": "08:00:00"
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "example": "10:00:00"
+                    },
+                    "is_active": {
+                        "type": "boolean",
+                        "example": false
+                    }
+                },
+                "type": "object"
+            },
+            "PeakHourCheckResponse": {
+                "title": "Peak Hour Check Response",
+                "description": "Kết quả kiểm tra giờ cao điểm",
+                "properties": {
+                    "success": {
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "is_peak_hour": {
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "peak_hour_info": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/PeakHour"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "checked_datetime": {
+                        "type": "string",
+                        "format": "datetime",
+                        "example": "2024-01-01 08:30:00"
+                    }
+                },
+                "type": "object"
+            },
+            "PricingRule": {
+                "title": "Pricing Rule",
+                "description": "Bảng giá cho các loại xe",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "parking_lot_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "vehicle_type": {
+                        "type": "string",
+                        "enum": [
+                            "motorbike",
+                            "car_4_seat",
+                            "car_7_seat",
+                            "light_truck"
+                        ],
+                        "example": "car_4_seat"
+                    },
+                    "hourly": {
+                        "description": "Giá mỗi giờ (VND)",
+                        "type": "number",
+                        "format": "float",
+                        "example": 10000
+                    },
+                    "daily_cap": {
+                        "description": "Giá tối đa mỗi ngày (VND)",
+                        "type": "number",
+                        "format": "float",
+                        "example": 100000
+                    },
+                    "monthly_pass": {
+                        "description": "Giá vé tháng (VND)",
+                        "type": "number",
+                        "format": "float",
+                        "example": 600000
+                    },
+                    "peak_enabled": {
+                        "description": "Có áp dụng giờ cao điểm không",
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "peak_multiplier": {
+                        "description": "Hệ số nhân giá giờ cao điểm",
+                        "type": "number",
+                        "format": "float",
+                        "example": 1.5
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "datetime",
+                        "example": "2024-01-01T00:00:00.000000Z"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "datetime",
+                        "example": "2024-01-01T00:00:00.000000Z"
+                    },
+                    "parking_lot": {
+                        "$ref": "#/components/schemas/ParkingLot"
+                    }
+                },
+                "type": "object"
+            },
+            "PricingRuleRequest": {
+                "title": "Pricing Rule Request",
+                "description": "Dữ liệu tạo/cập nhật bảng giá",
+                "required": [
+                    "parking_lot_id",
+                    "vehicle_type",
+                    "hourly"
+                ],
+                "properties": {
+                    "parking_lot_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "vehicle_type": {
+                        "type": "string",
+                        "enum": [
+                            "motorbike",
+                            "car_4_seat",
+                            "car_7_seat",
+                            "light_truck"
+                        ],
+                        "example": "car_4_seat"
+                    },
+                    "hourly": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 10000
+                    },
+                    "daily_cap": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 100000
+                    },
+                    "monthly_pass": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 600000
+                    },
+                    "peak_enabled": {
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "peak_multiplier": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 1.5
+                    }
+                },
+                "type": "object"
+            },
+            "PricingRuleUpdateRequest": {
+                "title": "Pricing Rule Update Request",
+                "description": "Dữ liệu cập nhật bảng giá",
+                "properties": {
+                    "hourly": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 12000
+                    },
+                    "daily_cap": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 120000
+                    },
+                    "monthly_pass": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 720000
+                    },
+                    "peak_enabled": {
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "peak_multiplier": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 1.8
+                    }
+                },
+                "type": "object"
+            },
+            "ValidationError": {
+                "title": "Validation Error Response",
+                "description": "Response trả về khi dữ liệu không hợp lệ",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "example": "The given data was invalid."
+                    },
+                    "errors": {
+                        "type": "object",
+                        "example": {
+                            "status": [
+                                "The status field is required."
+                            ]
+                        }
+                    }
+                },
+                "type": "object"
+            }
+        },
         "securitySchemes": {
             "bearerAuth": {
                 "type": "http",
@@ -51,6 +3183,26 @@
         }
     },
     "tags": [
+        {
+            "name": "🏢 Parking Lots",
+            "description": "Quản lý thông tin bãi đỗ xe"
+        },
+        {
+            "name": "🅿️ Parking Slots",
+            "description": "Quản lý & tra cứu chỗ đỗ xe"
+        },
+        {
+            "name": "Peak Hours",
+            "description": "Quản lý giờ cao điểm cho các bãi đỗ xe"
+        },
+        {
+            "name": "Pricing Rules",
+            "description": "Quản lý bảng giá cho các loại xe"
+        },
+        {
+            "name": "🎫 Reservations",
+            "description": "Quản lý đặt chỗ và cấp chỗ tự động"
+        },
         {
             "name": "Sample",
             "description": "Sample"

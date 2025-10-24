@@ -29,7 +29,13 @@ services:
       - storage_auth:/var/www/html/storage
       - cache_auth:/var/www/html/bootstrap/cache
     expose: ["9000"]
-    # entrypoint: ["/usr/local/bin/entrypoint.sh"]
+    command:
+      [
+        "sh",
+        "-lc",
+        "php-fpm -D; php artisan optimize:clear && php artisan queue:work redis --queue=default --sleep=1 --tries=3 --timeout=90",
+      ]
+    entrypoint: ["/usr/local/bin/entrypoint.sh"]
     depends_on:
       auth-composer:
         condition: service_completed_successfully
