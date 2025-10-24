@@ -1072,9 +1072,16 @@ class ReservationController extends Controller
 
     private function getPricingSnapshot(int $parkingLotId, string $vehicleType): array
     {
-        $pricingRule = PricingRule::where('parking_lot_id', $parkingLotId)
-            ->where('vehicle_type', $vehicleType)
-            ->first();
+        // Tạo key dựa trên parking_lot_id và vehicle_type
+        $key = "parking_lot_{$parkingLotId}_{$vehicleType}";
+        
+        $pricingRule = PricingRule::where('key', $key)->first();
+        
+        // Nếu không tìm thấy pricing cụ thể, sử dụng default
+        if (!$pricingRule) {
+            $defaultKey = "default_{$vehicleType}";
+            $pricingRule = PricingRule::where('key', $defaultKey)->first();
+        }
 
         return $pricingRule ? $pricingRule->toArray() : [];
     }

@@ -23,6 +23,7 @@ class ReservationStoreRequest extends FormRequest
             'parking_lot_id' => 'required|integer|exists:parking_lots,id',
             'user_id' => 'required|integer',
             'vehicle_id' => 'required|integer',
+            'vehicle_type' => 'required|string|in:motorbike,car_4_seat,car_7_seat,light_truck',
             'desired_start_time' => 'required|date|after_or_equal:now',
             'duration_minutes' => 'required|integer|min:30|max:1440',
         ];

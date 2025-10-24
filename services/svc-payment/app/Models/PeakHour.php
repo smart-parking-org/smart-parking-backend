@@ -11,41 +11,71 @@ class PeakHour extends Model
     use HasFactory;
 
     protected $fillable = [
-        'parking_lot_id',
-        'day_of_week',
-        'start_time',
-        'end_time',
-        'is_active',
+        'key',
+        'value',
     ];
 
     protected $casts = [
-        'day_of_week' => 'integer',
-        'start_time' => 'datetime',
-        'end_time' => 'datetime',
-        'is_active' => 'boolean',
+        'value' => 'array',
     ];
 
     /**
-     * Quan hệ: PeakHour thuộc về một ParkingLot
+     * Lấy cấu hình giờ cao điểm theo key
      */
-    public function parkingLot()
+    public static function getPeakHourConfig(string $key): ?array
     {
-        return $this->belongsTo(ParkingLot::class);
+        $config = self::where('key', $key)->first();
+        return $config ? $config->value : null;
     }
 
     /**
-     * Kiểm tra nếu thời gian truyền vào có nằm trong khung cao điểm
+     * Cập nhật cấu hình giờ cao điểm
      */
-    public function isWithinPeak(Carbon $time): bool
+    public static function updatePeakHourConfig(string $key, array $value): bool
     {
-        if (!$this->is_active) {
+        $config = self::where('key', $key)->first();
+        
+        if ($config) {
+            $config->update(['value' => $value]);
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Tạo hoặc cập nhật cấu hình giờ cao điểm
+     */
+    public static function setPeakHourConfig(string $key, array $value): self
+    {
+        return self::updateOrCreate(
+            ['key' => $key],
+            ['value' => $value]
+        );
+    }
+
+    /**
+     * Kiểm tra xem một thời điểm có phải giờ cao điểm không
+     */
+    public static function isPeakHour(string $key, Carbon $datetime): bool
+    {
+        $config = self::getPeakHourConfig($key);
+        
+        if (!$config) {
             return false;
         }
 
-        $dayMatch = $time->dayOfWeek === $this->day_of_week;
-        $inTime = $time->format('H:i:s') >= $this->start_time &&
-            $time->format('H:i:s') < $this->end_time;
-
-        return $dayMatch && $inTime;
+        $dayOfWeek = $datetime->dayOfWeek; // 1=Monday, 7=Sunday
+        
+        foreach ($config['peak_hours'] ?? [] as $peakHour) {
+            if ($peakHour['day_of_week'] == $dayOfWeek && 
+                $peakHour['is_active'] &&
+                $datetime->format('H:i:s') >= $peakHour['start_time'] &&
+                $datetime->format('H:i:s') < $peakHour['end_time']) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 }

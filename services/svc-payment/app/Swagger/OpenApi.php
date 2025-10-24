@@ -2,6 +2,12 @@
 
 namespace App\Swagger;
 
+use App\Swagger\Schemas\ParkingLotSchema;
+use App\Swagger\Schemas\ParkingSlotSchema;
+use App\Swagger\Schemas\PricingRuleSchema;
+use App\Swagger\Schemas\PeakHourSchema;
+use App\Swagger\Schemas\ValidationErrorSchema;
+
 /**
  * @OA\Info(
  *     title="Smart Parking - Payment Service API",

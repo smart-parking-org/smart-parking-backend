@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
         DB::table('reservation_requests')->truncate();
         DB::table('pricing_rules')->truncate();
         DB::table('peak_hours')->truncate();
+        DB::table('extension_policies')->truncate();
         DB::table('parking_lots')->truncate();
         Schema::enableForeignKeyConstraints();
 
@@ -30,6 +31,7 @@ class DatabaseSeeder extends Seeder
                 ParkingSlotSeeder::class,
                 PricingRuleSeeder::class,
                 PeakHourSeeder::class,
+                ExtensionPolicySeeder::class,
             ]);
 
             DB::commit();

@@ -12,20 +12,8 @@ return new class extends Migration {
     {
         Schema::create('pricing_rules', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('parking_lot_id')->constrained('parking_lots', 'id')->cascadeOnDelete();
-
-            $table->enum('vehicle_type', ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'])->unique();
-
-            // --- Cấu hình giá ---
-            $table->decimal('hourly', 10, 2);              // giá mỗi giờ
-            $table->integer('rounding_minutes')->default(30); // làm tròn 30 phút
-            $table->decimal('daily_cap', 10, 2)->nullable();   // mức trần 1 ngày
-            $table->decimal('monthly_pass', 10, 2)->nullable(); // giá vé tháng
-
-            // --- Cao điểm ---
-            $table->boolean('peak_enabled')->default(false);     // có áp dụng giờ cao điểm không
-            $table->decimal('peak_multiplier', 5, 2)->nullable(); // hệ số giờ cao điểm (ví dụ 1.5x)
-
+            $table->string('key')->unique(); // Unique key identifier
+            $table->json('value'); // JSON data containing pricing configuration
             $table->timestamps();
         });
     }
