@@ -16,8 +16,8 @@ class ParkingLotSeeder extends Seeder
         DB::table('parking_lots')->insert([
             [
                 'name' => 'B1 Basement',
-                'gate_pos_x' => 0,
-                'gate_pos_y' => 0,
+                'gate_pos_x' => 10.806176400733412,
+                'gate_pos_y' => 106.6286676510779,
                 'created_at' => now(),
                 'updated_at' => now(),
             ],

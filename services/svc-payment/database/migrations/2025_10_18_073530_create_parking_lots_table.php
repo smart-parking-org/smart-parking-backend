@@ -13,8 +13,8 @@ return new class extends Migration {
         Schema::create('parking_lots', function (Blueprint $table) {
             $table->id();
             $table->string('name');
-            $table->integer('gate_pos_x')->default(0);
-            $table->integer('gate_pos_y')->default(0);
+            $table->decimal('gate_pos_x', 18, 15);
+            $table->decimal('gate_pos_y', 18, 15);
             $table->timestamps();
         });
     }

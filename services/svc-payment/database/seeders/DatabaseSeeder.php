@@ -15,12 +15,12 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         Schema::disableForeignKeyConstraints();
-        DB::table('parking_lots')->truncate();
         DB::table('parking_slots')->truncate();
+        DB::table('reservations')->truncate();
         DB::table('reservation_requests')->truncate();
         DB::table('pricing_rules')->truncate();
         DB::table('peak_hours')->truncate();
-        DB::table('reservations')->truncate();
+        DB::table('parking_lots')->truncate();
         Schema::enableForeignKeyConstraints();
 
         DB::beginTransaction();

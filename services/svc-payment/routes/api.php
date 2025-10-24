@@ -19,9 +19,9 @@ Route::match(['get', 'post'], '/payments/ipn', [PaymentController::class, 'ipn']
 // Parking slots
 Route::prefix('parking-lots')->group(function () {
     Route::get('/', [ParkingLotController::class, 'index']);
-    Route::get('/{id}', [ParkingLotController::class, 'show']);
     Route::get('/{id}/slots', [ParkingLotController::class, 'slotMap']);
     Route::get('/{id}/statistics', [ParkingLotController::class, 'statistics']);
+    Route::get('/{id}/stream', [ParkingLotController::class, 'stream']);
 });
 
 // Slots
@@ -33,8 +33,15 @@ Route::prefix('slots')->group(function () {
 
 // Reservations
 Route::prefix('reservations')->group(function () {
+    Route::get('/', [ReservationController::class, 'index']);           // Danh sách tất cả reservation
     Route::post('/', [ReservationController::class, 'store']);           // Đặt chỗ
     Route::get('/{id}', [ReservationController::class, 'show']);        // Chi tiết
     Route::put('/{id}/extend', [ReservationController::class, 'extend']); // Gia hạn
     Route::put('/{id}/cancel', [ReservationController::class, 'cancel']); // Hủy
+    Route::put('/{id}/check-in', [ReservationController::class, 'checkIn']); // check-in
+    Route::put('/{id}/check-out', [ReservationController::class, 'checkOut']); // check-out
+
+    Route::post('/demo/check-in', [ReservationController::class, 'demoCheckIn']);
+    Route::post('/demo/check-out', [ReservationController::class, 'demoCheckOut']);
+    Route::post('/expire-due', [ReservationController::class, 'expireDue']);
 });
