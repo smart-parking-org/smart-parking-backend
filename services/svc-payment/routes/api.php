@@ -9,6 +9,12 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('payment')->group(function () {
     Route::get('ping', [SampleController::class, 'ping']);
 });
+use App\Http\Controllers\PaymentController;
+
+Route::post('/payments/create', [PaymentController::class, 'create']);
+Route::match(['get', 'post'], '/payments/return', [PaymentController::class, 'return']);
+Route::match(['get', 'post'], '/payments/ipn', [PaymentController::class, 'ipn']);
+
 
 // Parking slots
 Route::prefix('parking-lots')->group(function () {
