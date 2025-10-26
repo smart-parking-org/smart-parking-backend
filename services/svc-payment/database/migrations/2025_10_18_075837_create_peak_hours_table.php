@@ -18,7 +18,7 @@ return new class extends Migration {
             $table->time('start_time');         // Bắt đầu khung giờ cao điểm
             $table->time('end_time');           // Kết thúc
             $table->boolean('is_active')->default(true); // Bật/tắt khung này
-
+            $table->unique(['parking_lot_id', 'day_of_week', 'start_time', 'end_time'], 'unique_peak_hour_slot');
             $table->timestamps();
         });
     }
