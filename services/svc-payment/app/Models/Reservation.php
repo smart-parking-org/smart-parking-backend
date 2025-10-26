@@ -13,9 +13,11 @@ class Reservation extends Model
         'user_id',
         'vehicle_id',
         'slot_id',
+        'reservation_request_id',
         'reservation_code',
         'status',
-        'reserved_at',
+        'start_time',
+        'end_time',
         'expires_at',
         'extended_at',
         'check_in_at',
@@ -24,15 +26,18 @@ class Reservation extends Model
         'user_snapshot',
         'vehicle_snapshot',
         'pricing_snapshot',
+        'extension_count'
     ];
 
     protected $casts = [
-        'reserved_at' => 'datetime',
+        'start_time' => 'datetime',
+        'end_time' => 'datetime',
         'expires_at' => 'datetime',
         'extended_at' => 'datetime',
         'check_in_at' => 'datetime',
         'check_out_at' => 'datetime',
         'cancelled_at' => 'datetime',
+        'extension_count' => 'integer',
 
         'user_snapshot' => 'array',
         'vehicle_snapshot' => 'array',
@@ -43,6 +48,11 @@ class Reservation extends Model
     public function slot()
     {
         return $this->belongsTo(ParkingSlot::class);
+    }
+
+    public function reservationRequest()
+    {
+        return $this->belongsTo(ReservationRequest::class, 'reservation_request_id');
     }
 
     // Shortcut để lấy biển số (nếu có)

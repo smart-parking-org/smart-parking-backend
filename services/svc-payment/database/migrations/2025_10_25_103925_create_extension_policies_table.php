@@ -10,11 +10,10 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        Schema::create('parking_lots', function (Blueprint $table) {
+        Schema::create('extension_policies', function (Blueprint $table) {
             $table->id();
-            $table->string('name');
-            $table->decimal('gate_pos_x', 18, 15);
-            $table->decimal('gate_pos_y', 18, 15);
+            $table->string('key')->unique();
+            $table->json('value');
             $table->timestamps();
         });
     }
@@ -24,6 +23,6 @@ return new class extends Migration {
      */
     public function down(): void
     {
-        Schema::dropIfExists('parking_lots');
+        Schema::dropIfExists('extension_policies');
     }
 };

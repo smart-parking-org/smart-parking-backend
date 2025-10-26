@@ -15,12 +15,13 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         Schema::disableForeignKeyConstraints();
-        DB::table('parking_lots')->truncate();
         DB::table('parking_slots')->truncate();
+        DB::table('reservations')->truncate();
         DB::table('reservation_requests')->truncate();
         DB::table('pricing_rules')->truncate();
         DB::table('peak_hours')->truncate();
-        DB::table('reservations')->truncate();
+        DB::table('parking_lots')->truncate();
+        DB::table('extension_policies')->truncate();
         Schema::enableForeignKeyConstraints();
 
         DB::beginTransaction();
@@ -30,7 +31,9 @@ class DatabaseSeeder extends Seeder
                 ParkingSlotSeeder::class,
                 PricingRuleSeeder::class,
                 PeakHourSeeder::class,
+                ExtensionPolicySeeder::class
             ]);
+
 
             DB::commit();
             $this->command->info('✅ Seeding hoàn tất (đã COMMIT).');

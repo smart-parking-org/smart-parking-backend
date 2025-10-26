@@ -16,7 +16,10 @@ class ParkingSlot extends Model
         'status',
         'position_x',
         'position_y',
+        'distance_from_gate'
     ];
+
+    protected $appends = ['effective_status'];
 
     public function parkingLot()
     {
@@ -28,6 +31,11 @@ class ParkingSlot extends Model
         return $this->hasMany(Reservation::class, 'slot_id');
     }
 
+    public function reservationRequests()
+    {
+        return $this->hasMany(ReservationRequest::class, 'allocated_slot_id');
+    }
+
     public function currentReservation()
     {
         return $this->hasOne(Reservation::class, 'slot_id')
@@ -35,27 +43,38 @@ class ParkingSlot extends Model
             ->latest();
     }
 
-    // Lọc slot khả dụng
-    public function scopeAvailable($query)
+    public function scopeWithActiveReservations($query)
     {
-        return $query->where('status', 'available');
+        $now = now();
+        return $query->with([
+            'currentReservation' => function ($query) use ($now) {
+                $query->where('status', 'confirmed')
+                    ->where('start_time', '<=', $now)
+                    ->where('expires_at', '>=', $now);
+            }
+        ]);
     }
 
-    // kiểu xe tiếng Việt
-    public function getVehicleTypeLabelAttribute(): string
+    // Trạng thái thực tế: nếu có reservation hiện tại → hold, ngược lại dùng status của slot
+    public function getEffectiveStatusAttribute(): string
     {
-        return match ($this->vehicle_type) {
-            'motorbike' => 'Xe máy',
-            'car_4_seat' => 'Ô tô 4 chỗ',
-            'car_7_seat' => 'Ô tô 7 chỗ',
-            'light_truck' => 'Xe tải nhẹ',
-            default => ucfirst($this->vehicle_type),
-        };
-    }
+        $now = now();
 
-    // Kiểm tra slot có đang bị chiếm không
-    public function isOccupied(): bool
-    {
-        return $this->status === 'occupied';
+        // Lấy reservation một lần
+        $reservation = $this->currentReservation;
+
+        // Kiểm tra reservation có tồn tại và hợp lệ không
+        if (
+            $reservation &&
+            $reservation->status === 'confirmed' &&
+            $reservation->start_time &&
+            $reservation->expires_at &&
+            $now->between($reservation->start_time, $reservation->expires_at)
+        ) {
+            return 'hold';
+        }
+
+
+        return $this->status;
     }
 }

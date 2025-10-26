@@ -15,10 +15,10 @@ return new class extends Migration {
             $table->foreignId('parking_lot_id')->constrained('parking_lots', 'id')->cascadeOnDelete();
             $table->string('slot_code')->unique();
             $table->enum('vehicle_type', ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck']);
-            $table->enum('status', ['available', 'hold', 'occupied'])->default('available');
-            $table->integer('position_x');
-            $table->integer('position_y');
-
+            $table->enum('status', ['available', 'occupied'])->default('available');
+            $table->decimal('position_x', 18, 15);
+            $table->decimal('position_y', 18, 15);
+            $table->decimal('distance_from_gate', 10, 2);
             $table->timestamps();
         });
     }
