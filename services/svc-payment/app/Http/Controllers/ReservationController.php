@@ -808,6 +808,7 @@ class ReservationController extends Controller
 
         return response()->json([
             'success' => true,
+            'message' => 'Check-out thành công',
             'data' => $reservation
         ]);
     }
