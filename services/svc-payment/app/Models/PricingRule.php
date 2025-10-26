@@ -13,7 +13,6 @@ class PricingRule extends Model
         'parking_lot_id',
         'vehicle_type',
         'hourly',
-        'rounding_minutes',
         'daily_cap',
         'monthly_pass',
         'peak_enabled',
@@ -22,7 +21,6 @@ class PricingRule extends Model
 
     protected $casts = [
         'hourly' => 'float',
-        'rounding_minutes' => 'integer',
         'daily_cap' => 'float',
         'monthly_pass' => 'float',
         'peak_enabled' => 'boolean',

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ExtensionPolicy;
 use App\Services\AuthService;
 use App\Services\PriorityQueueSlotAllocationService;
 use Carbon\Carbon;
@@ -572,20 +573,12 @@ class ReservationController extends Controller
     public function extend($id)
     {
         $reservation = Reservation::findOrFail($id);
-        $extendMinutes = 15;
 
         // Kiểm tra điều kiện gia hạn
         if ($reservation->status !== 'confirmed') {
             return response()->json([
                 'success' => false,
                 'message' => 'Chỉ có thể gia hạn reservation đang confirmed'
-            ], 422);
-        }
-
-        if ($reservation->extended_at) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Đã gia hạn 1 lần, không thể gia hạn thêm'
             ], 422);
         }
 
@@ -597,9 +590,40 @@ class ReservationController extends Controller
             ], 422);
         }
 
+        $parkingLotId = $reservation->slot->parking_lot_id;
+        $extensionPolicy = ExtensionPolicy::getForParkingLot($parkingLotId);
+
+        if (!$extensionPolicy || !$extensionPolicy->value['is_active']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chính sách gia hạn không được kích hoạt'
+            ], 422);
+        }
+
+        // Đếm số lần đã gia hạn
+        $currentExtensions = $reservation->extension_count ?? 0;
+
+        // Kiểm tra có thể gia hạn thêm không
+        if (!$extensionPolicy->canExtend($currentExtensions)) {
+            return response()->json([
+                'success' => false,
+                'message' => "Đã đạt giới hạn số lần gia hạn ({$extensionPolicy->value['max_extensions']} lần)"
+            ], 422);
+        }
+
+        $extendMinutes = $extensionPolicy->getExtensionMinutes();
+
+        if (!$extensionPolicy || !$extensionPolicy->canExtend()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không thể gia hạn theo chính sách hiện tại'
+            ], 422);
+        }
+
         // Gia hạn thêm 15 phút
         $reservation->update([
             'extended_at' => now(),
+            'extension_count' => $currentExtensions + 1,
             'expires_at' => $reservation->expires_at->addMinutes($extendMinutes)
         ]);
 
@@ -784,6 +808,7 @@ class ReservationController extends Controller
 
         return response()->json([
             'success' => true,
+            'message' => 'Check-out thành công',
             'data' => $reservation
         ]);
     }

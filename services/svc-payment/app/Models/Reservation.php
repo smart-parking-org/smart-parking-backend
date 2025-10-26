@@ -26,6 +26,7 @@ class Reservation extends Model
         'user_snapshot',
         'vehicle_snapshot',
         'pricing_snapshot',
+        'extension_count'
     ];
 
     protected $casts = [
@@ -36,6 +37,7 @@ class Reservation extends Model
         'check_in_at' => 'datetime',
         'check_out_at' => 'datetime',
         'cancelled_at' => 'datetime',
+        'extension_count' => 'integer',
 
         'user_snapshot' => 'array',
         'vehicle_snapshot' => 'array',

@@ -37,6 +37,7 @@ return new class extends Migration {
             $table->timestamp('check_in_at')->nullable();   // lúc vào bãi
             $table->timestamp('check_out_at')->nullable();  // lúc rời bãi
             $table->timestamp('cancelled_at')->nullable();  // nếu bị hủy
+            $table->integer('extension_count')->default(0);
 
             // Dữ liệu snapshot
             $table->json('user_snapshot')->nullable();      // tên, email, sdt, role
