@@ -12,6 +12,19 @@ use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Schema;
 
+/**
+ * COMMAND: MÔ PHỎNG VÀ ĐÁNH GIÁ THUẬT TOÁN CẤP CHỖ
+ *
+ * Mục đích:
+ * - Sinh dữ liệu 300 lượt đặt với phân bố giờ cao điểm 60%
+ * - Đo tỷ lệ xung đột, thời gian đáp ứng, độ sử dụng chỗ
+ * - So sánh 2 thuật toán (Priority Queue vs Hungarian)
+ * - Đánh giá theo yêu cầu: xung đột < 2%, thời gian TB < 1.5s
+ *
+ * Cách sử dụng:
+ * php artisan test:peak-hour-reservations --requests=300 --peak-ratio=60 --algorithm=priority_queue
+ * php artisan test:peak-hour-reservations --requests=300 --peak-ratio=60 --algorithm=hungarian
+ */
 class GeneratePeakHourReservations extends Command
 {
     protected $signature = 'test:peak-hour-reservations
@@ -39,18 +52,21 @@ class GeneratePeakHourReservations extends Command
         $this->info("   - Giờ bình thường: {$normalRequests} requests (" . (100 - $peakRatio) . "%)");
         $this->info("   - Thuật toán: " . $algorithmNameMap[$algorithm]);
 
-        // Reset dữ liệu
+        // Bước 1: Reset dữ liệu cũ
         $this->resetData();
 
-        // Tạo dữ liệu test
-        $this->createTestData($totalRequests, $peakRequests, $normalRequests);
+        // Bước 2: Tạo dữ liệu mô phỏng
+        $this->createTestData($peakRequests, $normalRequests);
 
         $this->info("✅ Hoàn thành tạo dữ liệu mô phỏng!");
 
-        // Chạy test allocation
+        // Bước 3: Chạy test allocation và đo metrics
         $this->runTest($algorithmNameMap, $algorithm);
     }
 
+    /**
+     * Reset dữ liệu cũ để đảm bảo test sạch
+     */
     private function resetData()
     {
         Schema::disableForeignKeyConstraints();
@@ -60,7 +76,11 @@ class GeneratePeakHourReservations extends Command
         ParkingSlot::query()->update(['status' => 'available']);
     }
 
-    private function createTestData($totalRequests, $peakRequests, $normalRequests)
+
+    /**
+     * Tạo dữ liệu test
+     */
+    private function createTestData($peakRequests, $normalRequests)
     {
         $this->info("📈 Tạo {$peakRequests} requests giờ cao điểm...");
         $this->createPeakHourRequests($peakRequests);
@@ -69,88 +89,147 @@ class GeneratePeakHourReservations extends Command
         $this->createNormalHourRequests($normalRequests);
     }
 
+    /**
+     * Tạo requests cho giờ cao điểm
+     *
+     * Giờ cao điểm:
+     * - Sáng: 07:00 - 09:00 (đi làm)
+     * - Chiều: 17:30 - 19:30 (về nhà)
+     *
+     * Phân bố loại xe theo tỷ lệ thực tế:
+     * - Xe máy: 50% (phổ biến nhất trong chung cư)
+     * - Ô tô 4 chỗ: 33%
+     * - Ô tô 7 chỗ: 12%
+     * - Xe tải nhẹ: 5%
+     *
+     * Duration: 4-8 giờ (phản ánh cả ngày hoặc qua đêm)
+     */
     private function createPeakHourRequests($count)
     {
-        // Giờ cao điểm: 7-9h và 17-19h
+        // Khung giờ cao điểm
         $peakHours = [
             ['start' => '07:00', 'end' => '09:00'],
-            ['start' => '17:00', 'end' => '19:00']
+            ['start' => '17:30', 'end' => '19:30']
         ];
 
-        // Phân bố loại xe theo thực tế Việt Nam
-        $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
-        $vehicleRatios = [0.70, 0.25, 0.04, 0.01];
+        // Phân bố loại xe theo tỷ lệ thực tế chung cư
+        $types = [
+            'motorbike' => 0.5,
+            'car_4_seat' => 0.33,
+            'car_7_seat' => 0.12,
+            'light_truck' => 0.05,
+        ];
 
         for ($i = 0; $i < $count; $i++) {
+            // Random chọn khung giờ cao điểm (sáng hoặc chiều)
             $peakHour = $peakHours[array_rand($peakHours)];
+
+            // Random thời gian bắt đầu trong khung giờ
             $startTime = $this->randomTimeInRange($peakHour['start'], $peakHour['end']);
-            $vehicleType = $this->selectVehicleType($vehicleTypes, $vehicleRatios);
+
+            // Random loại xe theo phân bố
+            $vehicleType = $this->selectVehicleType($types);
+
+            // Duration: 4-8 giờ (bước nhảy 30 phút)
+            // Phản ánh thực tế: đỗ cả ngày (sáng) hoặc qua đêm (chiều)
+            $duration = rand(8, 16) * 30; // 240 - 480 phút <=> 4-8 giờ
 
             ReservationRequest::create([
                 'parking_lot_id' => $this->getRandomParkingLot(),
                 'vehicle_type' => $vehicleType,
                 'desired_start_time' => $startTime,
-                'duration_minutes' => rand(60, 480), // 1-8 giờ
+                'duration_minutes' => $duration,
                 'status' => 'pending',
                 'requested_at' => now()
             ]);
         }
     }
 
+    /**
+     * Tạo ] requests cho giờ bình thường
+     *
+     * Giờ bình thường: Tất cả giờ khác ngoài giờ cao điểm
+     *
+     * Phân bố loại xe: Giống giờ cao điểm (50/33/12/5)
+     * Duration: 2-6 giờ (ngắn hơn giờ cao điểm, bước nhảy 30 phút)
+     */
     private function createNormalHourRequests($count)
     {
-        $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
-        $vehicleRatios = [0.70, 0.25, 0.04, 0.01];
+        // Phân bố loại xe giống giờ cao điểm
+        $types = [
+            'motorbike' => 0.5,
+            'car_4_seat' => 0.33,
+            'car_7_seat' => 0.12,
+            'light_truck' => 0.05,
+        ];
 
         for ($i = 0; $i < $count; $i++) {
+            // Random thời gian bắt đầu (tránh giờ cao điểm)
             $startTime = $this->randomNormalHour();
-            $vehicleType = $this->selectVehicleType($vehicleTypes, $vehicleRatios);
+
+            // Random loại xe theo phân bố
+            $vehicleType = $this->selectVehicleType($types);
+
+            // Duration: 2-6 giờ (bước nhảy 30 phút)
+            // Ngắn hơn giờ cao điểm vì người dùng đỗ ngắn hơn
+            $duration = rand(4, 12) * 30; // 120 - 360 phút <=> 2-6 giờ
 
             ReservationRequest::create([
                 'parking_lot_id' => $this->getRandomParkingLot(),
                 'vehicle_type' => $vehicleType,
                 'desired_start_time' => $startTime,
-                'duration_minutes' => rand(30, 360), // 30 phút - 6 giờ
+                'duration_minutes' => $duration,
                 'status' => 'pending',
                 'requested_at' => now()
             ]);
         }
     }
 
-    private function selectVehicleType($types, $ratios)
+    /**
+     * Chọn loại xe theo phân bố xác suất (weighted random)
+     */
+    private function selectVehicleType($weights)
     {
         $random = mt_rand() / mt_getrandmax();
         $cumulative = 0;
 
-        for ($i = 0; $i < count($types); $i++) {
-            $cumulative += $ratios[$i];
+        foreach ($weights as $k => $w) {
+            $cumulative += $w;
             if ($random <= $cumulative) {
-                return $types[$i];
+                return $k;
             }
         }
 
-        return $types[0];
+        return array_key_first($weights);
     }
 
+    /**
+     * Random thời gian trong khung giờ cho trước
+     */
     private function randomTimeInRange($startTime, $endTime)
     {
-        $start = Carbon::parse($startTime);
-        $end = Carbon::parse($endTime);
-        $randomMinutes = rand(0, $start->diffInMinutes($end));
+        $today = Carbon::today();
+        $start = $today->copy()->setTimeFromTimeString($startTime);
+        $end = $today->copy()->setTimeFromTimeString($endTime);
 
+        $randomMinutes = rand(0, max(0, $start->diffInMinutes($end)));
         return $start->copy()->addMinutes($randomMinutes);
     }
 
+    /**
+     * Random giờ bình thường (tránh giờ cao điểm)
+     */
     private function randomNormalHour()
     {
+        $today = Carbon::today();
         $hour = rand(0, 23);
 
-        // Tránh giờ cao điểm
+        // Tránh giờ cao điểm: 7-9h sáng và 17-19h chiều
         while (($hour >= 7 && $hour < 9) || ($hour >= 17 && $hour < 19)) {
             $hour = rand(0, 23);
         }
-
-        return Carbon::now()->setHour($hour)->setMinute(rand(0, 59))->setSecond(0);
+        $result = $today->copy()->setHour($hour)->setMinute(rand(0, 59))->setSecond(0);
+        return $result;
     }
 
     private function getRandomParkingLot()
@@ -159,12 +238,24 @@ class GeneratePeakHourReservations extends Command
         return $lot ? $lot->id : 1;
     }
 
+    /**
+     * Chạy test allocation và đo metrics
+     *
+     * Quy trình:
+     * 1. Sắp xếp requests theo ưu tiên (desired_start_time, requested_at)
+     * 2. Xử lý bằng thuật toán được chọn
+     * 3. Đo metrics: tỷ lệ xung đột, thời gian đáp ứng, độ sử dụng chỗ
+     * 4. Đánh giá theo yêu cầu đề tài
+     */
     private function runTest($algorithmNameMap, $algorithm)
     {
         $this->info("\n🔧 Bắt đầu test thuật toán " . $algorithmNameMap[$algorithm] . "...");
 
         // ƯU TIÊN THEO THỜI GIAN ĐẶT
+        // Sắp xếp theo desired_start_time (sớm nhất trước) để đảm bảo ưu tiên
+        // Tie-breaker: requested_at (đặt sớm hơn được ưu tiên)
         $requests = ReservationRequest::where('status', 'pending')
+            ->orderBy('desired_start_time', 'asc') // Ưu tiên theo thời gian MONG MUỐN bắt đầu đỗ
             ->orderBy('requested_at', 'asc') // Sắp xếp theo thời gian đặt
             ->get();
 
@@ -175,15 +266,18 @@ class GeneratePeakHourReservations extends Command
         $processingTimes = [];
 
         if ($algorithm === 'priority_queue') {
+            // Xử lý tuần tự từng request
             foreach ($requests as $request) {
                 $allocatedSlot = PriorityQueueSlotAllocationService::allocateSlot($request);
 
-                $processingTime = $request->processing_time_ms ?? 0;
+                // Lấy processing_time từ DB
+                $processingTime = $request->fresh()->processing_time_ms ?? 0;
                 $totalProcessingTime += $processingTime;
                 $processingTimes[] = $processingTime;
 
                 if ($allocatedSlot) {
                     $successCount++;
+                    // Tạo reservation khi allocation thành công
                     $this->createReservation($request, $allocatedSlot);
                 } else {
                     $conflictCount++;
@@ -205,11 +299,10 @@ class GeneratePeakHourReservations extends Command
 
                 if ($request && $slot) {
                     $this->createReservation($request, $slot);
-                    $processingTimes[] = $request->processing_time_ms ?? 0;
+                    $processingTimes[] = $request->fresh()->processing_time_ms ?? 0;
                 }
             }
         }
-
 
         // Tính kết quả
         $avgProcessingTime = $totalRequests > 0 ? $totalProcessingTime / $totalRequests : 0;
@@ -234,8 +327,16 @@ class GeneratePeakHourReservations extends Command
         $this->evaluateResults($conflictRate, $avgProcessingTime);
     }
 
+    /**
+     * Tạo reservation từ request và slot đã được cấp
+     */
     private function createReservation($request, $slot)
     {
+        // Đảm bảo timezone UTC khi lưu vào DB
+        $startTime = $request->desired_start_time->copy()->utc();
+        $endTime = $startTime->copy()->addMinutes($request->duration_minutes);
+        $expiresAt = $startTime->copy()->addMinutes(15);
+
         Reservation::create([
             'user_id' => null,
             'vehicle_id' => null,
@@ -243,11 +344,9 @@ class GeneratePeakHourReservations extends Command
             'reservation_request_id' => $request->id,
             'reservation_code' => 'RES-' . strtoupper(uniqid()) . '-' . now()->format('Ymd'),
             'status' => 'confirmed',
-            'start_time' => $request->desired_start_time, // Thời gian bắt đầu đỗ,
-            'end_time' => $request->desired_start_time->copy()
-                ->addMinutes($request->duration_minutes), // Thời gian kết thúc đỗ
-            'expires_at' => $request->desired_start_time->copy()
-                ->addMinutes(15) // Thời gian hết hạn giữ chỗ
+            'start_time' => $startTime, // Thời gian bắt đầu đỗ,
+            'end_time' => $endTime, // Thời gian kết thúc đỗ
+            'expires_at' => $expiresAt // Thời gian hết hạn giữ chỗ
         ]);
     }
 
@@ -299,6 +398,11 @@ class GeneratePeakHourReservations extends Command
         return $conflictPass && $timePass;
     }
 
+    /**
+     * Tính độ sử dụng chỗ đỗ
+     *
+     * Công thức: (Số slot có ít nhất 1 reservation / Tổng số slot) × 100%
+     */
     private function calculateUtilization()
     {
         $totalSlots = ParkingSlot::count();
