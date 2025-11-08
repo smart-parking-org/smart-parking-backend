@@ -2,12 +2,14 @@
 
 use App\Http\Controllers\ExtensionPolicyController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\MonthlyPassController;
 use App\Http\Controllers\ParkingLotController;
 use App\Http\Controllers\ParkingSlotController;
 use App\Http\Controllers\PeakHourController;
 use App\Http\Controllers\PricingRuleController;
 use App\Http\Controllers\ReservationController;
 use App\Http\Controllers\SampleController;
+use App\Http\Controllers\ViolationController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('payment')->group(function () {
@@ -76,3 +78,29 @@ Route::prefix('extension-policies')->group(function () {
 });
 
 Route::post('/send-notification', [NotificationController::class, 'sendPushNotification']);
+// Monthly Passes
+Route::prefix('monthly-passes')->group(function () {
+    Route::post('/', [MonthlyPassController::class, 'store']);           // Tạo vé tháng + URL thanh toán
+    Route::get('/', [MonthlyPassController::class, 'index']);            // Danh sách tất cả vé tháng (có phân trang)
+    Route::get('/mine', [MonthlyPassController::class, 'mine']);         // Danh sách vé tháng của user
+    Route::get('/{id}', [MonthlyPassController::class, 'show']);         // Chi tiết vé tháng
+    Route::put('/{id}/cancel', [MonthlyPassController::class, 'cancel']); // Hủy vé tháng (chỉ khi PENDING)
+});
+
+// Violations - Tích hợp với Users (Yêu cầu đề tài: Quản lý cư dân - lịch sử vi phạm)
+Route::get('/users/{user_id}/violations', [ViolationController::class, 'getUserViolations']);
+
+// Violations
+Route::prefix('violations')->group(function () {
+    Route::get('/', [ViolationController::class, 'index']);                           // Danh sách vi phạm
+    Route::post('/', [ViolationController::class, 'store']);                          // Tạo vi phạm thủ công (WRONG_SLOT, NO_RESERVATION, OTHER)
+    Route::post('/detect-overstay', [ViolationController::class, 'detectOverstay']);  // Tự động phát hiện OVERSTAY
+    Route::post('/detect-late-checkin', [ViolationController::class, 'detectLateCheckIn']); // Tự động phát hiện LATE_CHECK_IN
+    Route::post('/detect-no-show', [ViolationController::class, 'detectNoShow']);     // Tự động phát hiện NO_SHOW
+    Route::post('/detect-late-payment', [ViolationController::class, 'detectLatePayment']); // Tự động phát hiện LATE_PAYMENT
+    Route::get('/mine', [ViolationController::class, 'mine']);                        // Vi phạm của user
+    Route::get('/{id}', [ViolationController::class, 'show']);                        // Chi tiết vi phạm
+    Route::put('/{id}/resolve', [ViolationController::class, 'resolve']);             // Xử lý vi phạm (Admin)
+    Route::put('/{id}/cancel', [ViolationController::class, 'cancel']);               // Hủy vi phạm
+    Route::post('/{id}/create-payment', [ViolationController::class, 'createPayment']); // Tạo thanh toán phạt
+});
