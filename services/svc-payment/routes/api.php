@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ExtensionPolicyController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\MonthlyPassController;
 use App\Http\Controllers\ParkingLotController;
 use App\Http\Controllers\ParkingSlotController;
@@ -76,6 +77,7 @@ Route::prefix('extension-policies')->group(function () {
     Route::get('/parking-lot/{parkingLotId}', [ExtensionPolicyController::class, 'getByParkingLot']);
 });
 
+Route::post('/send-notification', [NotificationController::class, 'sendPushNotification']);
 // Monthly Passes
 Route::prefix('monthly-passes')->group(function () {
     Route::post('/', [MonthlyPassController::class, 'store']);           // Tạo vé tháng + URL thanh toán
