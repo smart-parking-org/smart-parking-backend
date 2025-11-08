@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ExtensionPolicyController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ParkingLotController;
 use App\Http\Controllers\ParkingSlotController;
 use App\Http\Controllers\PeakHourController;
@@ -73,3 +74,5 @@ Route::prefix('extension-policies')->group(function () {
     Route::put('/{key}', [ExtensionPolicyController::class, 'update']);
     Route::get('/parking-lot/{parkingLotId}', [ExtensionPolicyController::class, 'getByParkingLot']);
 });
+
+Route::post('/send-notification', [NotificationController::class, 'sendPushNotification']);

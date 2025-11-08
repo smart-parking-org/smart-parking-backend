@@ -499,4 +499,56 @@ class UserController extends Controller
 
         return response()->json(['message' => 'FCM token updated']);
     }
+
+    /**
+     * @OA\Get(
+     *   path="/users/{id}/fcm-token",
+     *   tags={"FCM"},
+     *   summary="Lấy FCM token theo id user",
+     *   description="Lấy FCM token của người dùng theo user ID. Endpoint này thường được sử dụng bởi các service khác để lấy token gửi push notification.",
+     *   @OA\Parameter(
+     *     name="id",
+     *     in="path",
+     *     required=true,
+     *     description="User ID",
+     *     @OA\Schema(type="integer", example=1)
+     *   ),
+     *   @OA\Response(
+     *     response=200,
+     *     description="Lấy FCM token thành công",
+     *     @OA\JsonContent(
+     *       type="object",
+     *       @OA\Property(property="user_id", type="integer", example=1),
+     *       @OA\Property(property="fcm_token", type="string", example="eYQ2XZ...:APA91bH9...")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=404,
+     *     description="Không tìm thấy user hoặc user chưa có FCM token",
+     *     @OA\JsonContent(
+     *       type="object",
+     *       @OA\Property(property="message", type="string", example="Not found")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       type="object",
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
+     *   )
+     * )
+     */
+    public function getFcmToken(int $id)
+    {
+        $user = User::query()->select('id', 'fcm_token')->find($id);
+        if (!$user || !$user->fcm_token) {
+            return response()->json(['message' => 'Not found'], 404);
+        }
+        return response()->json([
+            'user_id' => $user->id,
+            'fcm_token' => $user->fcm_token,
+        ]);
+    }
 }

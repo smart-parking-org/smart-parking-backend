@@ -38,7 +38,8 @@ Route::prefix("vehicles")->group(function () {
 
 
 // FCM
-Route::put('/me/fcm-token', [UserController::class, 'updateFcmToken']);
+Route::put('/me/fcm-token', [UserController::class, 'updateFcmToken'])->middleware('auth:api');
+Route::get('/users/{id}/fcm-token', [UserController::class, 'getFcmToken']);
 // Users
 Route::prefix("users")->group(function () {
     Route::get('/', [UserController::class, 'index']);

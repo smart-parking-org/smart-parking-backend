@@ -23,7 +23,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withSchedule(function (Schedule $schedule) {
         $schedule->call(function () {
             app(\App\Http\Controllers\ReservationController::class)->expireDue();
-        })->everyFiveMinutes();
+        })->everyMinute();
+        $schedule->command('app:send-reservation-hold-notification')->everyMinute();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
