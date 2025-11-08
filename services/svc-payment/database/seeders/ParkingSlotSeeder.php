@@ -19,7 +19,7 @@ class ParkingSlotSeeder extends Seeder
 
         // Tạo slots cho các loại xe với tọa độ thực tế
         $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
-        $slotCounts = [200, 70, 10, 3]; // Số lượng slot cho mỗi loại xe
+        $slotCounts = [150, 100, 35, 15]; // Số lượng slot cho mỗi loại xe
         $prefixByType = [
             'motorbike' => 'MB',
             'car_4_seat' => 'C4',

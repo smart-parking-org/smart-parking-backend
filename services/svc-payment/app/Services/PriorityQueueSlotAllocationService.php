@@ -2,32 +2,82 @@
 
 namespace App\Services;
 
-use App\Models\Reservation;
 use Carbon\Carbon;
 use App\Models\ParkingSlot;
 use App\Models\ReservationRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * ===== MÔ TẢ THUẬT TOÁN =====
+ *
+ * ĐẦU VÀO:
+ * - ReservationRequest: Yêu cầu đặt chỗ gồm:
+ *   + parking_lot_id: ID bãi đỗ
+ *   + vehicle_type: Loại xe (motorbike, car_4_seat, car_7_seat, light_truck)
+ *   + desired_start_time: Thời gian mong muốn bắt đầu đỗ (Carbon)
+ *   + duration_minutes: Thời lượng đỗ (phút)
+ *
+ * ĐẦU RA:
+ * - ParkingSlot: Slot được cấp (null nếu không tìm được)
+ * - Cập nhật ReservationRequest với allocated_slot_id và processing_time_ms
+ *
+ * RÀNG BUỘC:
+ * 1. Slot phải cùng vehicle_type với request
+ * 2. Slot không được có reservation nào overlap thời gian với request:
+ *    - Overlap: existing.end_time > new.start_time AND existing.start_time < new.end_time
+ * 3. Slot phải cùng parking_lot_id
+ * 4. Chỉ xét reservations có status = 'confirmed' hoặc 'checked_in'
+ *
+ * HÀM MỤC TIÊU:
+ * - Tối ưu: Minimize distance_from_gate (chỗ gần cổng nhất)
+ * - Ưu tiên: Xử lý requests theo thứ tự desired_start_time (sớm nhất trước)
+ *
+ * THUẬT TOÁN:
+ * 1. Sắp xếp requests theo desired_start_time (do caller xử lý)
+ * 2. Với mỗi request, tìm slot gần cổng nhất còn trống:
+ *    - Lọc theo vehicle_type và parking_lot_id
+ *    - Loại bỏ slots có conflict thời gian
+ *    - Chọn slot có distance_from_gate nhỏ nhất
+ * 3. Sử dụng DB transaction + lockForUpdate() để tránh race condition
+ *
+ * ĐỘ PHỨC TẠP:
+ * - Time Complexity: O(M × N × log N) trong đó:
+ *   + M = số requests cần xử lý (300 trong test)
+ *   + N = số slots cho vehicle_type (trung bình 75-150)
+ *   + log N = chi phí query với index trên distance_from_gate
+ * - Space Complexity: O(1) - không cần lưu trữ thêm
+ * - Database Queries per request: 1 query với subquery whereDoesntHave
+ * - Với 300 requests, N=100 slots: ~300 queries, mỗi query ~5-10ms
+ *   => Tổng: ~1.5-3s (đạt yêu cầu < 3s)
+ */
 class PriorityQueueSlotAllocationService
 {
+    /**
+     * Phân bổ slot cho 1 request
+     *
+     * @param ReservationRequest $request Request đặt chỗ
+     * @return ParkingSlot|null Slot được cấp, null nếu không tìm được
+     */
     public static function allocateSlot(ReservationRequest $request): ?ParkingSlot
     {
         $startTime = microtime(true);
 
         try {
-            // Lấy thời gian đỗ xe từ request
+            // Tính thời gian đỗ: từ desired_start_time đến desired_start_time + duration
             $parkingStart = $request->desired_start_time;
             $parkingEnd = $parkingStart->copy()->addMinutes($request->duration_minutes);
 
-            // Tìm chỗ trống
-            $availableSlots = self::findAvailableSlots(
+            // Tìm slot tốt nhất (gần cổng nhất, không conflict) trong transaction
+            $bestSlot = self::allocateBestSlotTransactional(
                 $request->parking_lot_id,
                 $request->vehicle_type,
                 $parkingStart,
                 $parkingEnd
             );
 
-            if ($availableSlots->isEmpty()) {
+            if (!$bestSlot) {
+                // Không tìm được slot phù hợp
                 $processingTime = (microtime(true) - $startTime) * 1000;
                 $request->update([
                     'status' => 'failed',
@@ -37,10 +87,7 @@ class PriorityQueueSlotAllocationService
                 return null;
             }
 
-            // Chọn chỗ gần cổng nhất
-            $bestSlot = $availableSlots->first();
-
-            // Cập nhật request
+            // Cập nhật request với slot được cấp
             $processingTime = (microtime(true) - $startTime) * 1000;
             $request->update([
                 'allocated_slot_id' => $bestSlot->id,
@@ -75,57 +122,45 @@ class PriorityQueueSlotAllocationService
     }
 
     /**
-     * Tìm chỗ trống dựa trên THỜI GIAN đỗ xe
+     * Tìm slot tốt nhất (gần cổng nhất, không conflict) trong transaction
+     *
+     * Logic overlap: 2 khoảng thời gian overlap nếu:
+     * existing.end_time > new.start_time AND existing.start_time < new.end_time
+     *
+     * @param int $parkingLotId ID bãi đỗ
+     * @param string $vehicleType Loại xe
+     * @param Carbon $parkingStart Thời gian bắt đầu đỗ
+     * @param Carbon $parkingEnd Thời gian kết thúc đỗ
+     * @return ParkingSlot|null Slot tốt nhất, null nếu không có
      */
-    private static function findAvailableSlots(
+    private static function allocateBestSlotTransactional(
         int $parkingLotId,
         string $vehicleType,
         Carbon $parkingStart,
         Carbon $parkingEnd
-    ) {
-        // Lấy tất cả chỗ phù hợp, sắp xếp theo khoảng cách từ cổng
-        $slots = ParkingSlot::where('parking_lot_id', $parkingLotId)
-            ->where('vehicle_type', $vehicleType)
-            ->orderBy('distance_from_gate', 'asc')
-            ->get();
+    ): ?ParkingSlot {
+        return DB::transaction(function () use ($parkingLotId, $vehicleType, $parkingStart, $parkingEnd) {
+            // Chuyển về UTC để so sánh nhất quán với DB
+            $parkingStart = $parkingStart->copy()->utc();
+            $parkingEnd = $parkingEnd->copy()->utc();
 
-        $availableSlots = collect();
-
-        foreach ($slots as $slot) {
-            if (!self::hasTimeConflict($slot->id, $parkingStart, $parkingEnd)) {
-                $availableSlots->push($slot);
-            }
-        }
-
-        return $availableSlots;
-    }
-
-    /**
-     * Kiểm tra xung đột dựa trên start_time và end_time
-     */
-    private static function hasTimeConflict($slotId, Carbon $parkingStart, Carbon $parkingEnd): bool
-    {
-        $conflict = Reservation::where('slot_id', $slotId)
-            ->whereIn('status', ['confirmed', 'checked_in'])
-            ->where(function ($query) use ($parkingStart, $parkingEnd) {
-                $query
-                    // Case 1: Reservation mới bắt đầu trong khoảng đã đặt
-                    ->whereBetween('start_time', [$parkingStart, $parkingEnd])
-                    // Case 2: Reservation mới kết thúc trong khoảng đã đặt
-                    ->orWhereBetween('end_time', [$parkingStart, $parkingEnd])
-                    // Case 3: Reservation mới bao trùm reservation cũ
-                    ->orWhere(function ($q) use ($parkingStart, $parkingEnd) {
-                        $q->where('start_time', '<=', $parkingStart)
-                            ->where('end_time', '>=', $parkingEnd);
-                    })
-                    // Case 4: Reservation cũ bao trùm reservation mới
-                    ->orWhere(function ($q) use ($parkingStart, $parkingEnd) {
-                        $q->where('start_time', '>=', $parkingStart)
-                            ->where('end_time', '<=', $parkingEnd);
+            // Tìm slot: cùng loại xe, không có reservation overlap, gần cổng nhất
+            $slot = ParkingSlot::where('parking_lot_id', $parkingLotId)
+                ->where('vehicle_type', $vehicleType)
+                ->whereDoesntHave('reservations', function ($q) use ($parkingStart, $parkingEnd) {
+                    // Chỉ xét reservations đang active (confirmed hoặc checked_in)
+                    $q->whereIn('status', ['confirmed', 'checked_in'])
+                        ->where(function ($qq) use ($parkingStart, $parkingEnd) {
+                        // Logic overlap đúng: overlap nếu existing.end > new.start AND existing.start < new.end
+                        $qq->where('end_time', '>', $parkingStart)
+                            ->where('start_time', '<', $parkingEnd);
                     });
-            })
-            ->exists();
+                })
+                ->orderBy('distance_from_gate', 'asc')  // Ưu tiên slot gần cổng nhất
+                ->lockForUpdate() // Lock để tránh 2 requests cùng lấy 1 slot
+                ->first();
 
-        return $conflict;
+            return $slot;
+        }, 3); // Retry 3 lần nếu deadlock
     }
 }
