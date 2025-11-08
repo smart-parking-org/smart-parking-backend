@@ -2,8 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\MonthlyPass;
 use App\Models\Payment;
+use App\Models\Violation;
 use App\Services\VnpayService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use OpenApi\Annotations as OA; // <-- Quan trọng cho swagger-php
@@ -145,15 +148,38 @@ class PaymentController extends Controller
             return response()->json(['message' => 'Amount mismatch'], 400);
         }
 
+        $wasPaid = false;
         if ($payment->status === 'PENDING') {
+            $newStatus = ($params['vnp_ResponseCode'] === '00') ? 'PAID' : 'FAILED';
+            $wasPaid = ($newStatus === 'PAID');
+            
+            // Giữ nguyên meta cũ và merge thêm thông tin từ VNPay
+            $existingMeta = is_array($payment->meta) ? $payment->meta : [];
+            $mergedMeta = array_merge($existingMeta, [
+                'vnp_return' => $params,
+            ]);
+            
             $payment->update([
-                'status' => ($params['vnp_ResponseCode'] === '00') ? 'PAID' : 'FAILED',
+                'status' => $newStatus,
                 'vnp_response_code' => $params['vnp_ResponseCode'] ?? null,
                 'vnp_transaction_no' => $params['vnp_TransactionNo'] ?? null,
                 'bank_code' => $params['vnp_BankCode'] ?? null,
                 'card_type' => $params['vnp_CardType'] ?? null,
-                'meta' => $params,
+                'meta' => $mergedMeta,
             ]);
+        }
+
+        // Xử lý các loại payment sau khi thanh toán thành công
+        if ($wasPaid) {
+            // Reload payment để lấy meta đã được update
+            $payment->refresh();
+            if ($payment->meta && isset($payment->meta['type'])) {
+                if ($payment->meta['type'] === 'monthly_pass') {
+                    $this->activateMonthlyPass($payment);
+                } elseif ($payment->meta['type'] === 'violation_fine') {
+                    $this->resolveViolation($payment);
+                }
+            }
         }
 
         return response()->json([
@@ -236,15 +262,149 @@ class PaymentController extends Controller
             return response()->json(['RspCode' => '02', 'Message' => 'Order already confirmed']);
         }
 
+        $wasPaid = false;
+        $newStatus = ($params['vnp_ResponseCode'] === '00') ? 'PAID' : 'FAILED';
+        $wasPaid = ($newStatus === 'PAID');
+
+        // Giữ nguyên meta cũ và merge thêm thông tin từ VNPay
+        $existingMeta = is_array($payment->meta) ? $payment->meta : [];
+        $mergedMeta = array_merge($existingMeta, [
+            'vnp_ipn' => $params,
+        ]);
+
         $payment->update([
-            'status' => ($params['vnp_ResponseCode'] === '00') ? 'PAID' : 'FAILED',
+            'status' => $newStatus,
             'vnp_response_code' => $params['vnp_ResponseCode'] ?? null,
             'vnp_transaction_no' => $params['vnp_TransactionNo'] ?? null,
             'bank_code' => $params['vnp_BankCode'] ?? null,
             'card_type' => $params['vnp_CardType'] ?? null,
-            'meta' => $params,
+            'meta' => $mergedMeta,
         ]);
 
+        // Xử lý các loại payment sau khi thanh toán thành công
+        if ($wasPaid) {
+            // Reload payment để lấy meta đã được update
+            $payment->refresh();
+            if ($payment->meta && isset($payment->meta['type'])) {
+                if ($payment->meta['type'] === 'monthly_pass') {
+                    $this->activateMonthlyPass($payment);
+                } elseif ($payment->meta['type'] === 'violation_fine') {
+                    $this->resolveViolation($payment);
+                }
+            }
+        }
+
         return response()->json(['RspCode' => '00', 'Message' => 'Confirm Success']);
+    }
+
+    /**
+     * Kích hoạt vé tháng sau khi thanh toán thành công
+     */
+    private function activateMonthlyPass(Payment $payment): void
+    {
+        try {
+            $passId = $payment->meta['monthly_pass_id'] ?? null;
+            if (!$passId) {
+                Log::warning('MonthlyPass ID not found in payment meta', [
+                    'payment_id' => $payment->id,
+                    'order_id' => $payment->order_id,
+                ]);
+                return;
+            }
+
+            $pass = MonthlyPass::find($passId);
+            if (!$pass) {
+                Log::warning('MonthlyPass not found', [
+                    'monthly_pass_id' => $passId,
+                    'payment_id' => $payment->id,
+                ]);
+                return;
+            }
+
+            if ($pass->status !== 'PENDING') {
+                Log::info('MonthlyPass already processed', [
+                    'monthly_pass_id' => $passId,
+                    'current_status' => $pass->status,
+                ]);
+                return;
+            }
+
+            // Tính ngày bắt đầu và kết thúc
+            $startDate = $pass->start_date ?: now()->toDateString();
+            $endDate = Carbon::parse($startDate)->addMonthsNoOverflow($pass->months)->toDateString();
+
+            $pass->update([
+                'status' => 'ACTIVE',
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+            ]);
+
+            Log::info('MonthlyPass activated successfully', [
+                'monthly_pass_id' => $pass->id,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'payment_id' => $payment->id,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to activate MonthlyPass', [
+                'payment_id' => $payment->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+        }
+    }
+
+    /**
+     * Tự động xử lý vi phạm sau khi thanh toán thành công
+     */
+    private function resolveViolation(Payment $payment): void
+    {
+        try {
+            $violationId = $payment->meta['violation_id'] ?? null;
+            if (!$violationId) {
+                Log::warning('Violation ID not found in payment meta', [
+                    'payment_id' => $payment->id,
+                    'order_id' => $payment->order_id,
+                ]);
+                return;
+            }
+
+            $violation = Violation::find($violationId);
+            if (!$violation) {
+                Log::warning('Violation not found', [
+                    'violation_id' => $violationId,
+                    'payment_id' => $payment->id,
+                ]);
+                return;
+            }
+
+            if ($violation->status !== 'PENDING') {
+                Log::info('Violation already processed', [
+                    'violation_id' => $violationId,
+                    'current_status' => $violation->status,
+                ]);
+                return;
+            }
+
+            // Cập nhật violation status thành RESOLVED
+            $violation->update([
+                'status' => 'RESOLVED',
+                'resolved_at' => now(),
+                'resolved_by' => $payment->meta['user_id'] ?? null,
+                'resolution_note' => 'Tự động xử lý sau khi thanh toán phạt thành công',
+            ]);
+
+            Log::info('Violation resolved successfully after payment', [
+                'violation_id' => $violation->id,
+                'payment_id' => $payment->id,
+                'fine_amount' => $payment->amount,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to resolve Violation after payment', [
+                'payment_id' => $payment->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+        }
     }
 }
