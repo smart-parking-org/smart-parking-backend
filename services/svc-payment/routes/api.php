@@ -17,6 +17,7 @@ use App\Http\Controllers\PaymentController;
 Route::post('/payments/create', [PaymentController::class, 'create']);
 Route::match(['get', 'post'], '/payments/return', [PaymentController::class, 'return']);
 Route::match(['get', 'post'], '/payments/ipn', [PaymentController::class, 'ipn']);
+Route::get('/payments/by-order/{orderId}', [PaymentController::class, 'getByOrder']);
 
 
 // Parking slots

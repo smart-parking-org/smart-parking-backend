@@ -501,9 +501,9 @@ class ReservationController extends Controller
                     'expires_at' => $start->copy()->addMinutes(15),
                     'user_snapshot' => $this->getUserSnapshot($reservationRequest->user_id),
                     'vehicle_snapshot' => $this->getVehicleSnapshot($reservationRequest->vehicle_id),
-                    'pricing_snapshot' => $this->getPricingSnapshot($reservationRequest->parking_lot_id, $reservationRequest->vehicle_type)
+                    'pricing_snapshot' => $this->getPricingSnapshot
+                    ($reservationRequest->parking_lot_id, $reservationRequest->vehicle_type)
                 ]);
-
                 // 5. Cập nhật Request → assigned
                 $reservationRequest->update(['status' => 'assigned']);
 
@@ -925,35 +925,110 @@ class ReservationController extends Controller
      * )
      */
     public function checkOut($id)
-    {
-        $reservation = Reservation::findOrFail($id);
+{
+    $reservation = Reservation::findOrFail($id);
 
-        if ($reservation->status !== 'checked_in') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Chỉ có thể check-out reservation đang checked_in'
-            ], 422);
-        }
-
-        // Cập nhật reservation
-        $reservation->update([
-            'status' => 'checked_out',
-            'check_out_at' => now()
-        ]);
-
-        // Slot chuyển về available
-        $reservation->slot->update(['status' => 'available']);
-
-        $this->finalizeRequestIfAny($reservation);
-
+    if ($reservation->status !== 'checked_in') {
         return response()->json([
-            'success' => true,
-            'message' => 'Check-out thành công',
-            'data' => $reservation
-        ]);
+            'success' => false,
+            'message' => 'Chỉ có thể check-out reservation đang checked_in'
+        ], 422);
     }
 
+    //  TÍNH TOÁN GIÁ TIỀN DỰA TRÊN PRICING SNAPSHOT
+    $amount = $this->calculatePaymentAmount($reservation);
+    
+    // TẠO PAYMENT
+    $payment = Payment::create([
+        'order_id' => $reservation->reservation_code,
+        'amount' => $amount,
+        'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
+        'status' => 'PENDING',
+    ]);
 
+    // Cập nhật reservation với payment_id
+    $reservation->update([
+        'status' => 'checked_out',
+        'check_out_at' => now(),
+        'payment_id' => $payment->id, // 🆕 Lưu payment_id
+    ]);
+
+    // Slot chuyển về available
+    $reservation->slot->update(['status' => 'available']);
+
+    $this->finalizeRequestIfAny($reservation);
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Check-out thành công',
+        'data' => [
+            'reservation' => $reservation,
+            'payment' => $payment,
+            'amount' => $amount,
+        ]
+    ]);
+}
+
+private function calculatePaymentAmount(Reservation $reservation): int
+{
+    $pricing = $reservation->pricing_snapshot;
+    
+    if (!$pricing || empty($pricing['hourly'])) {
+        return 0;
+    }
+    
+    $checkIn = Carbon::parse($reservation->check_in_at);
+    $checkOut = Carbon::parse($reservation->check_out_at);
+    $durationMinutes = $checkIn->diffInMinutes($checkOut);
+    
+    // Làm tròn theo rounding_minutes (ví dụ: 30 phút)
+    $roundingMinutes = $pricing['rounding_minutes'] ?? 30;
+    $roundedMinutes = ceil($durationMinutes / $roundingMinutes) * $roundingMinutes;
+    
+    // Tính số giờ
+    $hours = $roundedMinutes / 60;
+    
+    // Giá cơ bản
+    $amount = $pricing['hourly'] * $hours;
+    
+    // Áp dụng peak hour multiplier nếu có
+    if ($pricing['peak_enabled'] && $pricing['peak_multiplier']) {
+        // Kiểm tra xem có rơi vào giờ cao điểm không
+        $isPeakHour = $this->isPeakHour($checkIn, $checkOut, $reservation->slot->parking_lot_id);
+        if ($isPeakHour) {
+            $amount = $amount * $pricing['peak_multiplier'];
+        }
+    }
+    
+    // Áp dụng daily cap
+    if ($pricing['daily_cap'] && $amount > $pricing['daily_cap']) {
+        $amount = $pricing['daily_cap'];
+    }
+    
+    return (int) ceil($amount);
+}
+
+private function isPeakHour(Carbon $checkIn, Carbon $checkOut, int $parkingLotId): bool
+{
+    $peakHours = PeakHour::forParkingLot($parkingLotId)->get();
+    
+    foreach ($peakHours as $peak) {
+        if (!$peak->is_active) continue;
+        
+        $dayOfWeek = $checkIn->dayOfWeek;
+        if ($dayOfWeek != $peak->day_of_week) continue;
+        
+        $startTime = Carbon::parse($peak->start_time)->setDateFrom($checkIn);
+        $endTime = Carbon::parse($peak->end_time)->setDateFrom($checkIn);
+        
+        // Kiểm tra có chồng lấn không
+        if ($checkIn->lt($endTime) && $checkOut->gt($startTime)) {
+            return true;
+        }
+    }
+    
+    return false;
+}
     /**
      * @OA\Post(
      *     path="/demo/check-in",

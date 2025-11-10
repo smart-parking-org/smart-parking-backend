@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Log;
 use OpenApi\Annotations as OA; // <-- Quan trọng cho swagger-php
 
 /**
- * @OA\Tag(name="Payments", description="Payment operations via VNPAY")
+ * @OA\Tag(name="💳 Payments", description="Payment operations via VNPAY")
  */
 class PaymentController extends Controller
 {
@@ -132,19 +132,35 @@ class PaymentController extends Controller
         Log::info('VNPAY RETURN', $params);
 
         if (!$this->vnp->verify($params)) {
-            return response()->json(['message' => 'Invalid checksum'], 400);
+            return view('payment.error', [
+                'title' => 'Lỗi',
+                'message' => 'Chữ ký không hợp lệ',
+                'icon' => '❌',
+                'color' => '#ef4444'
+            ])->header('Content-Type', 'text/html; charset=utf-8');
         }
 
         $payment = Payment::where('txn_ref', $params['vnp_TxnRef'] ?? '')->first();
         if (!$payment) {
-            return response()->json(['message' => 'Order not found'], 404);
+            return view('payment.error', [
+                'title' => 'Lỗi',
+                'message' => 'Không tìm thấy đơn hàng',
+                'icon' => '❌',
+                'color' => '#ef4444'
+            ])->header('Content-Type', 'text/html; charset=utf-8');
         }
 
         $amountVnp = (int) ($params['vnp_Amount'] ?? 0) / 100;
         if ($amountVnp !== (int) $payment->amount) {
-            return response()->json(['message' => 'Amount mismatch'], 400);
+            return view('payment.error', [
+                'title' => 'Lỗi',
+                'message' => 'Số tiền không khớp',
+                'icon' => '❌',
+                'color' => '#ef4444'
+            ])->header('Content-Type', 'text/html; charset=utf-8');
         }
 
+        // Cập nhật status payment
         if ($payment->status === 'PENDING') {
             $payment->update([
                 'status' => ($params['vnp_ResponseCode'] === '00') ? 'PAID' : 'FAILED',
@@ -156,14 +172,30 @@ class PaymentController extends Controller
             ]);
         }
 
-        return response()->json([
-            'status' => $payment->status,
-            'order_id' => $payment->order_id,
-            'txn_ref' => $payment->txn_ref,
-            'message' => $payment->status === 'PAID' ? 'Thanh toán thành công' : 'Thanh toán không thành công',
+        // ✅ Chuẩn bị data cho view
+        $status = $payment->status;
+        $isSuccess = $status === 'PAID';
+
+        $title = $isSuccess ? 'Thanh toán thành công!' : 'Thanh toán thất bại';
+        $message = $isSuccess
+            ? 'Cảm ơn bạn đã thanh toán. Vui lòng quay lại app để hoàn tất.'
+            : 'Thanh toán không thành công. Vui lòng thử lại hoặc chọn phương thức thanh toán khác.';
+        $icon = $isSuccess ? '✅' : '❌';
+        $color = $isSuccess ? '#10b981' : '#ef4444';
+
+        // Tạo deep link
+        $deepLink = "smartparkingmobile://payment/result?status={$status}&txn_ref={$payment->txn_ref}&order_id={$payment->order_id}";
+
+        // ✅ Return view với data
+        return view('payment.return', [
+            'title' => $title,
+            'message' => $message,
+            'icon' => $icon,
+            'color' => $color,
+            'deepLink' => $deepLink,
+            'payment' => $payment,
         ]);
     }
-
     /**
      * @OA\Post(
      *   path="/payments/ipn",
@@ -236,8 +268,10 @@ class PaymentController extends Controller
             return response()->json(['RspCode' => '02', 'Message' => 'Order already confirmed']);
         }
 
+        $paymentStatus = ($params['vnp_ResponseCode'] === '00') ? 'PAID' : 'FAILED';
+
         $payment->update([
-            'status' => ($params['vnp_ResponseCode'] === '00') ? 'PAID' : 'FAILED',
+            'status' => $paymentStatus,
             'vnp_response_code' => $params['vnp_ResponseCode'] ?? null,
             'vnp_transaction_no' => $params['vnp_TransactionNo'] ?? null,
             'bank_code' => $params['vnp_BankCode'] ?? null,
@@ -245,6 +279,43 @@ class PaymentController extends Controller
             'meta' => $params,
         ]);
 
+        // checkout khi thanh toán thành công
+        if ($paymentStatus === 'PAID') {
+            $reservation = \App\Models\Reservation::where('reservation_code', $payment->order_id)->first();
+
+            if ($reservation && $reservation->status === 'checked_in') {
+                // Gọi checkout
+                $reservationController = new \App\Http\Controllers\ReservationController(
+                    app(\App\Services\AuthService::class)
+                );
+
+                try {
+                    $checkoutResult = $reservationController->checkOut($reservation->id);
+                    Log::info('Auto checkout after payment success', [
+                        'reservation_id' => $reservation->id,
+                        'reservation_code' => $reservation->reservation_code
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('Auto checkout failed', [
+                        'reservation_id' => $reservation->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+        }
+
         return response()->json(['RspCode' => '00', 'Message' => 'Confirm Success']);
+    }
+    public function getByOrder($orderId)
+    {
+        $payment = Payment::where('order_id', $orderId)
+            ->orderBy('created_at', 'desc')
+            ->first();
+
+        if (!$payment) {
+            return response()->json(['message' => 'Payment not found'], 404);
+        }
+
+        return response()->json($payment);
     }
 }
