@@ -6,10 +6,7 @@ use App\Models\CheckoutCode;
 use App\Models\MonthlyPass;
 use App\Models\Payment;
 use App\Models\Violation;
-use App\Models\MonthlyPass;
-use App\Models\Payment;
 use App\Models\Reservation;
-use App\Models\Violation;
 use App\Services\ParkingFeeService;
 use App\Services\VnpayService;
 use Carbon\Carbon;
@@ -155,7 +152,6 @@ class PaymentController extends Controller
             'amount' => $r->amount,
             'txn_ref' => $txnRef,
             'status' => 'PENDING',
-            'reservation_id' => $reservation->id,
             'meta' => [
                 'type' => 'parking_fee',
                 'reservation_id' => $reservation->id,
@@ -306,10 +302,10 @@ class PaymentController extends Controller
             // ✅ Tạo QR checkout code khi thanh toán reservation thành công (trong return URL)
             $reservation = null;
             if ($payment->reservation_id) {
-                $reservation = \App\Models\Reservation::find($payment->reservation_id);
+                $reservation = Reservation::find($payment->reservation_id);
             } else {
                 // Fallback: tìm theo order_id (reservation_code)
-                $reservation = \App\Models\Reservation::where('reservation_code', $payment->order_id)->first();
+                $reservation = Reservation::where('reservation_code', $payment->order_id)->first();
             }
 
             if ($reservation && $reservation->status === 'pending_checkout') {
@@ -395,7 +391,7 @@ class PaymentController extends Controller
      *   )
      * )
      *
-     * @OA@Get(
+     * @OA\Get(
      *   path="/payments/ipn",
      *   operationId="PaymentsIpnGET",
      *   tags={"Payments"},

@@ -6,8 +6,6 @@ use App\Models\CheckoutCode;
 use App\Models\ExtensionPolicy;
 use App\Models\Payment;
 use App\Models\PeakHour;
-use App\Models\ExtensionPolicy;
-use App\Models\Payment;
 use App\Services\AuthService;
 use App\Services\ParkingFeeService;
 use App\Services\PriorityQueueSlotAllocationService;
@@ -511,8 +509,7 @@ class ReservationController extends Controller
                     'expires_at' => $start->copy()->addMinutes(15),
                     'user_snapshot' => $this->getUserSnapshot($reservationRequest->user_id),
                     'vehicle_snapshot' => $this->getVehicleSnapshot($reservationRequest->vehicle_id),
-                    'pricing_snapshot' => $this->getPricingSnapshot
-                    ($reservationRequest->parking_lot_id, $reservationRequest->vehicle_type)
+                    'pricing_snapshot' => $this->getPricingSnapshot($reservationRequest->parking_lot_id, $reservationRequest->vehicle_type)
                 ]);
                 // 5. Cập nhật Request → assigned
                 $reservationRequest->update(['status' => 'assigned']);
