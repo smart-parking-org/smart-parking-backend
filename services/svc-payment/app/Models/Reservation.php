@@ -26,7 +26,8 @@ class Reservation extends Model
         'user_snapshot',
         'vehicle_snapshot',
         'pricing_snapshot',
-        'extension_count'
+        'extension_count',
+        'payment_id',
     ];
 
     protected $casts = [
@@ -74,6 +75,18 @@ class Reservation extends Model
     // Trạng thái kiểm tra nhanh
     public function isActive(): bool
     {
-        return in_array($this->status, ['confirmed', 'checked_in']);
+        return in_array($this->status, ['confirmed', 'checked_in', 'pending_checkout']);
+    }
+
+    // Relationship với CheckoutCode
+    public function checkoutCodes()
+    {
+        return $this->hasMany(CheckoutCode::class);
+    }
+
+    // Relationship với Payment
+    public function payment()
+    {
+        return $this->belongsTo(Payment::class);
     }
 }

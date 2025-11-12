@@ -23,7 +23,8 @@ return new class extends Migration {
             // Trạng thái
             $table->enum('status', [
                 'confirmed',    // đã giữ chỗ thành công
-                'checked_in',   // đã vào bãi
+                'checked_in',
+                'pending_checkout',  // đã vào bãi
                 'checked_out',  // đã rời bãi
                 'cancelled',    // cư dân hủy
                 'expired'       // quá hạn giữ chỗ

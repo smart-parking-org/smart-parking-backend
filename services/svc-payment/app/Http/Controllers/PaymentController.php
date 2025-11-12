@@ -2,6 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CheckoutCode;
+use App\Models\MonthlyPass;
+use App\Models\Payment;
+use App\Models\Violation;
 use App\Models\MonthlyPass;
 use App\Models\Payment;
 use App\Models\Reservation;
@@ -11,10 +15,11 @@ use App\Services\VnpayService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use OpenApi\Annotations as OA; // <-- Quan trọng cho swagger-php
 
 /**
- * @OA\Tag(name="Payments", description="Payment operations via VNPAY")
+ * @OA\Tag(name="💳 Payments", description="Payment operations via VNPAY")
  */
 class PaymentController extends Controller
 {
@@ -31,8 +36,10 @@ class PaymentController extends Controller
      *   @OA\RequestBody(
      *     required=true,
      *     @OA\JsonContent(
-     *       required={"reservation_id"},
-     *       @OA\Property(property="reservation_id", type="integer", example=101),
+     *       required={"order_id","amount"},
+     *       @OA\Property(property="order_id", type="string", example="INV-10001"),
+     *       @OA\Property(property="amount", type="integer", example=50000, minimum=1000),
+     *       @OA\Property(property="reservation_id", type="integer", nullable=true, example=123, description="ID của reservation (cho thanh toán checkout)"),
      *       @OA\Property(property="bank_code", type="string", nullable=true, example="NCB")
      *     )
      *   ),
@@ -53,7 +60,9 @@ class PaymentController extends Controller
     public function create(Request $r)
     {
         $r->validate([
-            'reservation_id' => 'required|integer|exists:reservations,id',
+            'order_id' => 'required',
+            'amount' => 'required|integer|min:1000',
+            'reservation_id' => 'nullable|integer|exists:reservations,id', // ✅ Thêm validation
         ]);
 
         $reservation = Reservation::with('slot')->find($r->reservation_id);
@@ -141,8 +150,9 @@ class PaymentController extends Controller
         $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
 
         $p = Payment::create([
-            'order_id' => $orderId,
-            'amount' => $amount,
+            'order_id' => $r->order_id,
+            'reservation_id' => $r->reservation_id, // ✅ Thêm dòng này
+            'amount' => $r->amount,
             'txn_ref' => $txnRef,
             'status' => 'PENDING',
             'reservation_id' => $reservation->id,
@@ -232,17 +242,32 @@ class PaymentController extends Controller
         Log::info('VNPAY RETURN', $params);
 
         if (!$this->vnp->verify($params)) {
-            return response()->json(['message' => 'Invalid checksum'], 400);
+            return view('payment.error', [
+                'title' => 'Lỗi',
+                'message' => 'Chữ ký không hợp lệ',
+                'icon' => '❌',
+                'color' => '#ef4444'
+            ])->header('Content-Type', 'text/html; charset=utf-8');
         }
 
         $payment = Payment::where('txn_ref', $params['vnp_TxnRef'] ?? '')->first();
         if (!$payment) {
-            return response()->json(['message' => 'Order not found'], 404);
+            return view('payment.error', [
+                'title' => 'Lỗi',
+                'message' => 'Không tìm thấy đơn hàng',
+                'icon' => '❌',
+                'color' => '#ef4444'
+            ])->header('Content-Type', 'text/html; charset=utf-8');
         }
 
         $amountVnp = (int) ($params['vnp_Amount'] ?? 0) / 100;
         if ($amountVnp !== (int) $payment->amount) {
-            return response()->json(['message' => 'Amount mismatch'], 400);
+            return view('payment.error', [
+                'title' => 'Lỗi',
+                'message' => 'Số tiền không khớp',
+                'icon' => '❌',
+                'color' => '#ef4444'
+            ])->header('Content-Type', 'text/html; charset=utf-8');
         }
 
         $wasPaid = false;
@@ -275,23 +300,70 @@ class PaymentController extends Controller
                     $this->activateMonthlyPass($payment);
                 } elseif ($payment->meta['type'] === 'violation_fine') {
                     $this->resolveViolation($payment);
-                } elseif ($payment->meta['type'] === 'parking_fee') {
-                    Log::info('Parking fee paid successfully', [
+                }
+            }
+
+            // ✅ Tạo QR checkout code khi thanh toán reservation thành công (trong return URL)
+            $reservation = null;
+            if ($payment->reservation_id) {
+                $reservation = \App\Models\Reservation::find($payment->reservation_id);
+            } else {
+                // Fallback: tìm theo order_id (reservation_code)
+                $reservation = \App\Models\Reservation::where('reservation_code', $payment->order_id)->first();
+            }
+
+            if ($reservation && $reservation->status === 'pending_checkout') {
+                try {
+                    // Kiểm tra xem đã có checkout_code chưa (tránh tạo trùng nếu IPN đã tạo trước)
+                    $existingCode = CheckoutCode::where('reservation_id', $reservation->id)
+                        ->where('status', 'active')
+                        ->first();
+
+                    if (!$existingCode) {
+                        // Tạo QR checkout code
+                        $checkoutCode = $this->createCheckoutCode($reservation, $payment);
+
+                        Log::info('Checkout QR code created in return URL', [
+                            'reservation_id' => $reservation->id,
+                            'reservation_code' => $reservation->reservation_code,
+                            'checkout_code' => $checkoutCode->checkout_code,
+                            'payment_id' => $payment->id,
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Failed to create checkout QR code in return URL', [
+                        'reservation_id' => $reservation->id ?? null,
                         'payment_id' => $payment->id,
-                        'reservation_id' => $payment->meta['reservation_id'] ?? null,
+                        'error' => $e->getMessage(),
                     ]);
                 }
             }
         }
 
-        return response()->json([
-            'status' => $payment->status,
-            'order_id' => $payment->order_id,
-            'txn_ref' => $payment->txn_ref,
-            'message' => $payment->status === 'PAID' ? 'Thanh toán thành công' : 'Thanh toán không thành công',
+        // ✅ Chuẩn bị data cho view
+        $status = $payment->status;
+        $isSuccess = $status === 'PAID';
+
+        $title = $isSuccess ? 'Thanh toán thành công!' : 'Thanh toán thất bại';
+        $message = $isSuccess
+            ? 'Cảm ơn bạn đã thanh toán. Vui lòng quay lại app để hoàn tất.'
+            : 'Thanh toán không thành công. Vui lòng thử lại hoặc chọn phương thức thanh toán khác.';
+        $icon = $isSuccess ? '✅' : '❌';
+        $color = $isSuccess ? '#10b981' : '#ef4444';
+
+        // Tạo deep link
+        $deepLink = "smartparking://payment/result?status={$status}&txn_ref={$payment->txn_ref}&order_id={$payment->order_id}&reservation_id={$payment->reservation_id}";
+
+        // ✅ Return view với data
+        return view('payment.return', [
+            'title' => $title,
+            'message' => $message,
+            'icon' => $icon,
+            'color' => $color,
+            'deepLink' => $deepLink,
+            'payment' => $payment,
         ]);
     }
-
     /**
      * @OA\Post(
      *   path="/payments/ipn",
@@ -387,15 +459,42 @@ class PaymentController extends Controller
         if ($wasPaid) {
             // Reload payment để lấy meta đã được update
             $payment->refresh();
+
+            // Xử lý monthly pass hoặc violation fine
             if ($payment->meta && isset($payment->meta['type'])) {
                 if ($payment->meta['type'] === 'monthly_pass') {
                     $this->activateMonthlyPass($payment);
                 } elseif ($payment->meta['type'] === 'violation_fine') {
                     $this->resolveViolation($payment);
-                } elseif ($payment->meta['type'] === 'parking_fee') {
-                    Log::info('Parking fee paid successfully', [
+                }
+            }
+
+            // Tạo QR checkout code khi thanh toán reservation thành công
+            $reservation = null;
+            if ($payment->reservation_id) {
+                $reservation = \App\Models\Reservation::find($payment->reservation_id);
+            } else {
+                // Fallback: tìm theo order_id (reservation_code)
+                $reservation = \App\Models\Reservation::where('reservation_code', $payment->order_id)->first();
+            }
+
+            if ($reservation && $reservation->status === 'pending_checkout') {
+                try {
+                    // Tạo QR checkout code
+                    $checkoutCode = $this->createCheckoutCode($reservation, $payment);
+
+                    Log::info('Checkout QR code created after payment success', [
+                        'reservation_id' => $reservation->id,
+                        'reservation_code' => $reservation->reservation_code,
+                        'checkout_code' => $checkoutCode->checkout_code,
                         'payment_id' => $payment->id,
-                        'reservation_id' => $payment->meta['reservation_id'] ?? null,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('Failed to create checkout QR code', [
+                        'reservation_id' => $reservation->id,
+                        'payment_id' => $payment->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
                     ]);
                 }
             }
@@ -404,144 +503,17 @@ class PaymentController extends Controller
         return response()->json(['RspCode' => '00', 'Message' => 'Confirm Success']);
     }
 
-    /**
-     * @OA\Get(
-     *   path="/payments/status/{reservation_id}",
-     *   operationId="PaymentsStatus",
-     *   tags={"Payments"},
-     *   summary="Kiểm tra trạng thái thanh toán theo reservation (dùng cho mobile app sau khi quay lại từ webview)",
-     *   @OA\Parameter(
-     *     name="reservation_id",
-     *     in="path",
-     *     required=true,
-     *     description="ID của reservation",
-     *     @OA\Schema(type="integer", example=101)
-     *   ),
-     *   @OA\Response(
-     *     response=200,
-     *     description="Trạng thái thanh toán",
-     *     @OA\JsonContent(
-     *       @OA\Property(property="status", type="string", enum={"PENDING","PAID","FAILED"}, example="PAID"),
-     *       @OA\Property(property="reservation_id", type="integer", example=101),
-     *       @OA\Property(property="order_id", type="string", example="RES-AB12CD34-20251019"),
-     *       @OA\Property(property="txn_ref", type="string", example="ORD20251018093000123"),
-     *       @OA\Property(property="amount", type="integer", example=50000),
-     *       @OA\Property(property="vnp_transaction_no", type="string", nullable=true),
-     *       @OA\Property(property="bank_code", type="string", nullable=true),
-     *       @OA\Property(property="card_type", type="string", nullable=true),
-     *       @OA\Property(property="message", type="string", example="Thanh toán thành công")
-     *     )
-     *   ),
-     *   @OA\Response(response=404, description="Payment not found")
-     * )
-     */
-    public function status(int $reservationId)
+    public function getByOrder($orderId)
     {
-        // Ưu tiên lấy payment PENDING hoặc PAID, nếu không có thì lấy payment mới nhất
-        $payment = Payment::where('reservation_id', $reservationId)
-            ->whereIn('status', ['PENDING', 'PAID'])
-            ->orderByDesc('created_at')
+        $payment = Payment::where('order_id', $orderId)
+            ->orderBy('created_at', 'desc')
             ->first();
-
-        // Nếu không có PENDING/PAID, lấy payment mới nhất (có thể là FAILED)
-        if (!$payment) {
-            $payment = Payment::where('reservation_id', $reservationId)
-                ->orderByDesc('created_at')
-                ->first();
-        }
 
         if (!$payment) {
             return response()->json(['message' => 'Payment not found'], 404);
         }
 
-        $message = match ($payment->status) {
-            'PAID' => 'Thanh toán thành công',
-            'FAILED' => 'Thanh toán thất bại',
-            default => 'Đang chờ thanh toán',
-        };
-
-        return response()->json([
-            'status' => $payment->status,
-            'reservation_id' => $payment->reservation_id,
-            'order_id' => $payment->order_id,
-            'txn_ref' => $payment->txn_ref,
-            'amount' => $payment->amount,
-            'vnp_transaction_no' => $payment->vnp_transaction_no,
-            'bank_code' => $payment->bank_code,
-            'card_type' => $payment->card_type,
-            'message' => $message,
-        ]);
-    }
-
-    /**
-     * @OA\Get(
-     *   path="/payments/calculate/{reservation_id}",
-     *   operationId="PaymentsCalculate",
-     *   tags={"Payments"},
-     *   summary="Tính phí đỗ xe cho reservation",
-     *   description="Tính phí đỗ xe dựa trên thời gian check-in và check-out thực tế",
-     *   @OA\Parameter(
-     *     name="reservation_id",
-     *     in="path",
-     *     required=true,
-     *     description="ID của reservation",
-     *     @OA\Schema(type="integer")
-     *   ),
-     *   @OA\Response(
-     *     response=200,
-     *     description="Phí đỗ xe đã tính",
-     *     @OA\JsonContent(
-     *       @OA\Property(property="reservation_id", type="integer", example=101),
-     *       @OA\Property(property="amount", type="integer", example=50000),
-     *       @OA\Property(property="check_in_at", type="string", format="date-time"),
-     *       @OA\Property(property="check_out_at", type="string", format="date-time", nullable=true),
-     *       @OA\Property(property="duration_minutes", type="integer", example=120),
-     *       @OA\Property(property="vehicle_type", type="string", example="motorbike"),
-     *       @OA\Property(property="parking_lot_id", type="integer", example=1)
-     *     )
-     *   ),
-     *   @OA\Response(response=404, description="Reservation not found"),
-     *   @OA\Response(response=422, description="Reservation chưa check-in hoặc không hợp lệ")
-     * )
-     */
-    public function calculate(int $reservationId)
-    {
-        $reservation = Reservation::with('slot')->find($reservationId);
-
-        if (!$reservation) {
-            return response()->json(['message' => 'Reservation not found'], 404);
-        }
-
-        // Chỉ tính phí khi đã check-in
-        if (!$reservation->check_in_at) {
-            return response()->json([
-                'message' => 'Reservation chưa check-in, không thể tính phí'
-            ], 422);
-        }
-
-        $parkingLotId = $reservation->slot->parking_lot_id;
-        $vehicleType = $reservation->vehicle_snapshot['vehicle_type'] ?? 'motorbike';
-        $checkOutAt = $reservation->check_out_at ?? now();
-
-        $feeService = app(ParkingFeeService::class);
-        $amount = $feeService->calculateFee(
-            $reservation->check_in_at,
-            $checkOutAt,
-            $parkingLotId,
-            $vehicleType
-        );
-
-        $durationMinutes = $reservation->check_in_at->diffInMinutes($checkOutAt);
-
-        return response()->json([
-            'reservation_id' => $reservation->id,
-            'amount' => $amount,
-            'check_in_at' => $reservation->check_in_at->toIso8601String(),
-            'check_out_at' => $checkOutAt->toIso8601String(),
-            'duration_minutes' => $durationMinutes,
-            'vehicle_type' => $vehicleType,
-            'parking_lot_id' => $parkingLotId,
-        ]);
+        return response()->json($payment);
     }
 
     /**
@@ -653,5 +625,30 @@ class PaymentController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
         }
+    }
+
+    /**
+     * Tạo QR checkout code sau khi thanh toán thành công
+     */
+    private function createCheckoutCode(\App\Models\Reservation $reservation, Payment $payment): CheckoutCode
+    {
+        // Tạo mã checkout code duy nhất
+        $checkoutCode = 'CHK-' . strtoupper(Str::random(8)) . '-' . now()->format('Ymd');
+
+        // Kiểm tra mã đã tồn tại chưa (rất hiếm nhưng để an toàn)
+        while (CheckoutCode::where('checkout_code', $checkoutCode)->exists()) {
+            $checkoutCode = 'CHK-' . strtoupper(Str::random(8)) . '-' . now()->format('Ymd');
+        }
+
+        // Tạo checkout code với thời gian hết hạn 24 giờ
+        $checkoutCodeModel = CheckoutCode::create([
+            'reservation_id' => $reservation->id,
+            'payment_id' => $payment->id,
+            'checkout_code' => $checkoutCode,
+            'status' => 'active',
+            'expires_at' => now()->addHours(24),
+        ]);
+
+        return $checkoutCodeModel;
     }
 }

@@ -20,6 +20,8 @@ use App\Http\Controllers\PaymentController;
 Route::post('/payments/create', [PaymentController::class, 'create']);
 Route::match(['get', 'post'], '/payments/return', [PaymentController::class, 'return']);
 Route::match(['get', 'post'], '/payments/ipn', [PaymentController::class, 'ipn']);
+Route::get('/payments/by-order/{orderId}', [PaymentController::class, 'getByOrder']);
+
 Route::get('/payments/status/{reservation_id}', [PaymentController::class, 'status']);
 Route::get('/payments/calculate/{reservation_id}', [PaymentController::class, 'calculate']);
 
@@ -52,6 +54,63 @@ Route::prefix('reservations')->group(function () {
     Route::post('/demo/check-in', [ReservationController::class, 'demoCheckIn']);
     Route::post('/demo/check-out', [ReservationController::class, 'demoCheckOut']);
     Route::post('/expire-due', [ReservationController::class, 'expireDue']);
+    
+    // Checkout QR code APIs
+    Route::post('/scan-checkout', [ReservationController::class, 'scanCheckoutCode']); // Quét QR checkout code
+    Route::get('/{id}/checkout-code', [ReservationController::class, 'getCheckoutCode']); // Lấy QR checkout code
+});
+
+
+// Thêm vào routes/api.php
+Route::prefix('pricing-rules')->group(function () {
+    Route::put('/{id}', [PricingRuleController::class, 'update']);
+});
+
+// Route cho lấy quy tắc giá theo bãi đỗ xe
+Route::get('/parking-lots/{parkingLotId}/pricing-rules', [PricingRuleController::class, 'getByParkingLot']);
+
+// Thêm vào routes/api.php
+Route::prefix('peak-hours')->group(function () {
+    Route::post('/', [PeakHourController::class, 'store']);
+    Route::put('/{id}', [PeakHourController::class, 'update']);
+    Route::delete('/{id}', [PeakHourController::class, 'destroy']);
+});
+
+// Route cho lấy giờ cao điểm theo bãi đỗ xe
+Route::get('/parking-lots/{parkingLotId}/peak-hours', [PeakHourController::class, 'getByParkingLot']);
+
+
+Route::prefix('extension-policies')->group(function () {
+    Route::put('/{key}', [ExtensionPolicyController::class, 'update']);
+    Route::get('/parking-lot/{parkingLotId}', [ExtensionPolicyController::class, 'getByParkingLot']);
+});
+
+Route::post('/send-notification', [NotificationController::class, 'sendPushNotification']);
+// Monthly Passes
+Route::prefix('monthly-passes')->group(function () {
+    Route::post('/', [MonthlyPassController::class, 'store']);           // Tạo vé tháng + URL thanh toán
+    Route::get('/', [MonthlyPassController::class, 'index']);            // Danh sách tất cả vé tháng (có phân trang)
+    Route::get('/mine', [MonthlyPassController::class, 'mine']);         // Danh sách vé tháng của user
+    Route::get('/{id}', [MonthlyPassController::class, 'show']);         // Chi tiết vé tháng
+    Route::put('/{id}/cancel', [MonthlyPassController::class, 'cancel']); // Hủy vé tháng (chỉ khi PENDING)
+});
+
+// Violations - Tích hợp với Users (Yêu cầu đề tài: Quản lý cư dân - lịch sử vi phạm)
+Route::get('/users/{user_id}/violations', [ViolationController::class, 'getUserViolations']);
+
+// Violations
+Route::prefix('violations')->group(function () {
+    Route::get('/', [ViolationController::class, 'index']);                           // Danh sách vi phạm
+    Route::post('/', [ViolationController::class, 'store']);                          // Tạo vi phạm thủ công (WRONG_SLOT, NO_RESERVATION, OTHER)
+    Route::post('/detect-overstay', [ViolationController::class, 'detectOverstay']);  // Tự động phát hiện OVERSTAY
+    Route::post('/detect-late-checkin', [ViolationController::class, 'detectLateCheckIn']); // Tự động phát hiện LATE_CHECK_IN
+    Route::post('/detect-no-show', [ViolationController::class, 'detectNoShow']);     // Tự động phát hiện NO_SHOW
+    Route::post('/detect-late-payment', [ViolationController::class, 'detectLatePayment']); // Tự động phát hiện LATE_PAYMENT
+    Route::get('/mine', [ViolationController::class, 'mine']);                        // Vi phạm của user
+    Route::get('/{id}', [ViolationController::class, 'show']);                        // Chi tiết vi phạm
+    Route::put('/{id}/resolve', [ViolationController::class, 'resolve']);             // Xử lý vi phạm (Admin)
+    Route::put('/{id}/cancel', [ViolationController::class, 'cancel']);               // Hủy vi phạm
+    Route::post('/{id}/create-payment', [ViolationController::class, 'createPayment']); // Tạo thanh toán phạt
 });
 
 
