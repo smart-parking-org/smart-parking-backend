@@ -22,3 +22,4 @@ Thumbs.db
 
 # Docker
 *.pid
+services/svc-payment/public/*.json

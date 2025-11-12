@@ -41,5 +41,9 @@ return [
         'return_url' => env('VNPAY_RETURN_URL'),
         'ipn_url' => env('VNPAY_IPN_URL'),
     ],
-
+    'firebase' => [
+        'project_id' => env('FIREBASE_PROJECT_ID'),
+        'fcm_url' => env('FIREBASE_FCM_URL'),
+        'key_path' => public_path(env('FIREBASE_CREDENTIALS'))
+    ]
 ];

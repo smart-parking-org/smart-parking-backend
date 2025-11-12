@@ -146,4 +146,24 @@ class AuthService
             'vehicle_type' => $vehicleData['vehicle_type']
         ];
     }
+
+    public function getTokenByUserId(int $userId): ?string
+    {
+        try {
+            $response = Http::timeout($this->timeout)
+                ->get("{$this->baseUrl}/users/{$userId}/fcm-token");
+
+            if ($response->successful()) {
+                return $response->json('fcm_token');
+            }
+            return null;
+        } catch (\Exception $e) {
+            Log::error('Failed to check user existence', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+
+        }
+    }
 }
