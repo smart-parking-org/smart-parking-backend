@@ -20,7 +20,8 @@ use App\Http\Controllers\PaymentController;
 Route::post('/payments/create', [PaymentController::class, 'create']);
 Route::match(['get', 'post'], '/payments/return', [PaymentController::class, 'return']);
 Route::match(['get', 'post'], '/payments/ipn', [PaymentController::class, 'ipn']);
-
+Route::get('/payments/status/{reservation_id}', [PaymentController::class, 'status']);
+Route::get('/payments/calculate/{reservation_id}', [PaymentController::class, 'calculate']);
 
 // Parking slots
 Route::prefix('parking-lots')->group(function () {
@@ -41,6 +42,7 @@ Route::prefix('slots')->group(function () {
 Route::prefix('reservations')->group(function () {
     Route::get('/', [ReservationController::class, 'index']);           // Danh sách tất cả reservation
     Route::post('/', [ReservationController::class, 'store']);           // Đặt chỗ
+    Route::get('/user/{user_id}/history', [ReservationController::class, 'getUserHistory']);
     Route::get('/{id}', [ReservationController::class, 'show']);        // Chi tiết
     Route::put('/{id}/extend', [ReservationController::class, 'extend']); // Gia hạn
     Route::put('/{id}/cancel', [ReservationController::class, 'cancel']); // Hủy
@@ -77,7 +79,16 @@ Route::prefix('extension-policies')->group(function () {
     Route::get('/parking-lot/{parkingLotId}', [ExtensionPolicyController::class, 'getByParkingLot']);
 });
 
-Route::post('/send-notification', [NotificationController::class, 'sendPushNotification']);
+Route::prefix('notifications')->group(function () {
+    Route::post('/send', [NotificationController::class, 'sendPushNotification']);
+    Route::get('/', [NotificationController::class, 'index']);
+    Route::put('/{id}/read', [NotificationController::class, 'markAsRead']);
+    Route::put('/mark-all-read', [NotificationController::class, 'markAllAsRead']);
+    Route::get('/unread-count', [NotificationController::class, 'getUnreadCount']);
+    Route::delete('/{id}', [NotificationController::class, 'destroy']); // Xóa một notification
+    Route::delete('/delete-all', [NotificationController::class, 'deleteAll']); // Xóa tất cả notifications của user
+});
+
 // Monthly Passes
 Route::prefix('monthly-passes')->group(function () {
     Route::post('/', [MonthlyPassController::class, 'store']);           // Tạo vé tháng + URL thanh toán

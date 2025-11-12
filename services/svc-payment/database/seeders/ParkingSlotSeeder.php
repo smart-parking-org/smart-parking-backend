@@ -27,44 +27,80 @@ class ParkingSlotSeeder extends Seeder
             'light_truck' => 'LT',
         ];
 
-        $lot = DB::table('parking_lots')->first(['id', 'gate_pos_x', 'gate_pos_y']); // lấy 1 bãi đầu tiên
-        $lotId = $lot->id; // lấy 1 bãi đầu tiên
+        // Lấy tất cả các bãi đỗ xe
+        $lots = DB::table('parking_lots')->get(['id', 'name', 'gate_pos_x', 'gate_pos_y']);
 
-        // Tọa độ cổng
-        $gateLat = $lot->gate_pos_x; // Latitude cổng
-        $gateLng = $lot->gate_pos_y; // Longitude cổng
+        foreach ($lots as $lot) {
+            $lotId = $lot->id;
+            $gateLat = $lot->gate_pos_x; // Latitude cổng
+            $gateLng = $lot->gate_pos_y; // Longitude cổng
 
-        // Tạo tất cả slots trước
-        $slots = [];
+            // Tạo prefix từ tên bãi đỗ xe (ví dụ: "Tầng hầm B1" -> "B1")
+            $lotPrefix = $this->extractLotPrefix($lot->name);
 
-        foreach ($vehicleTypes as $index => $vehicleType) {
-            $prefix = $prefixByType[$vehicleType];
-            $slotCount = $slotCounts[$index];
+            // Tạo tất cả slots cho bãi này
+            $slots = [];
 
-            for ($i = 0; $i < $slotCount; $i++) {
-                // Tính toán tọa độ GPS dựa trên loại xe và vị trí
-                $position = $this->calculateGPSPosition($vehicleType, $i, $gateLat, $gateLng);
+            foreach ($vehicleTypes as $index => $vehicleType) {
+                $prefix = $prefixByType[$vehicleType];
+                $slotCount = $slotCounts[$index];
 
-                // Tính khoảng cách từ cổng (meters)
-                $distance = $this->calculateDistance($gateLat, $gateLng, $position['lat'], $position['lng']);
+                for ($i = 0; $i < $slotCount; $i++) {
+                    // Tính toán tọa độ GPS dựa trên loại xe và vị trí
+                    $position = $this->calculateGPSPosition($vehicleType, $i, $gateLat, $gateLng);
 
-                $slots[] = [
-                    'parking_lot_id' => $lotId,
-                    'slot_code' => $prefix . '-' . str_pad($i + 1, 3, '0', STR_PAD_LEFT),
-                    'vehicle_type' => $vehicleType,
-                    'status' => 'available',
-                    'position_x' => $position['lat'], // Latitude
-                    'position_y' => $position['lng'], // Longitude
-                    'distance_from_gate' => round($distance, 2),
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ];
+                    // Tính khoảng cách từ cổng (meters)
+                    $distance = $this->calculateDistance($gateLat, $gateLng, $position['lat'], $position['lng']);
+
+                    // Slot code với prefix của bãi đỗ xe để đảm bảo unique
+                    $slotCode = $lotPrefix . '-' . $prefix . '-' . str_pad($i + 1, 3, '0', STR_PAD_LEFT);
+
+                    $slots[] = [
+                        'parking_lot_id' => $lotId,
+                        'slot_code' => $slotCode,
+                        'vehicle_type' => $vehicleType,
+                        'status' => 'available',
+                        'position_x' => $position['lat'], // Latitude
+                        'position_y' => $position['lng'], // Longitude
+                        'distance_from_gate' => round($distance, 2),
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
             }
+
+            // Insert slots cho bãi này
+            foreach ($slots as $slot) {
+                ParkingSlot::create($slot);
+            }
+
+            $this->command->info("Created " . count($slots) . " slots for parking lot: {$lot->name}");
+        }
+    }
+
+    /**
+     * Trích xuất prefix từ tên bãi đỗ xe
+     * Ví dụ: "Tầng hầm B1" -> "B1", "Bãi đỗ xe Tòa A" -> "TOA-A"
+     */
+    private function extractLotPrefix($lotName)
+    {
+        // Nếu tên có dạng "Tầng hầm B1", "Tầng hầm B2", "Tầng hầm B3"
+        if (preg_match('/B(\d+)/i', $lotName, $matches)) {
+            return 'B' . $matches[1];
         }
 
-        foreach ($slots as $slot) {
-            ParkingSlot::create($slot);
+        // Nếu tên có dạng "Bãi đỗ xe Tòa A", "Bãi đỗ xe Tòa B"
+        if (preg_match('/Tòa\s+([A-Z])/i', $lotName, $matches)) {
+            return 'TOA-' . strtoupper($matches[1]);
         }
+
+        // Nếu tên có dạng "Bãi đỗ xe Khu A", "Bãi đỗ xe Khu B"
+        if (preg_match('/Khu\s+([A-Z])/i', $lotName, $matches)) {
+            return 'KHU-' . strtoupper($matches[1]);
+        }
+
+        // Mặc định: lấy 3 ký tự đầu và chuyển thành uppercase
+        return strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $lotName), 0, 3));
     }
 
     /**
@@ -112,27 +148,27 @@ class ParkingSlotSeeder extends Seeder
     {
         switch ($vehicleType) {
             case 'motorbike':
-                // Xe máy: 7 hàng x 15 cột = 105 slots
+                // Xe máy: 10 hàng x 15 cột = 150 slots
                 $row = intval($index / 15);
                 $col = ($index % 15);
                 return ['x' => $col, 'y' => $row];
 
             case 'car_4_seat':
-                // Ô tô 4 chỗ: 5 hàng x 7 cột = 35 slots
-                $row = intval($index / 7) + 7; // Bắt đầu từ hàng 7
-                $col = ($index % 7);
+                // Ô tô 4 chỗ: 10 hàng x 10 cột = 100 slots
+                $row = intval($index / 10) + 10; // Bắt đầu từ hàng 10
+                $col = ($index % 10);
                 return ['x' => $col, 'y' => $row];
 
             case 'car_7_seat':
-                // Ô tô 7 chỗ: 2 hàng x 4 cột = 8 slots
-                $row = intval($index / 4) + 12; // Bắt đầu từ hàng 12
-                $col = ($index % 4);
+                // Ô tô 7 chỗ: 5 hàng x 7 cột = 35 slots
+                $row = intval($index / 7) + 20; // Bắt đầu từ hàng 20
+                $col = ($index % 7);
                 return ['x' => $col, 'y' => $row];
 
             case 'light_truck':
-                // Xe tải nhẹ: 1 hàng x 2 cột = 2 slots
-                $row = 14; // Hàng 14
-                $col = $index;
+                // Xe tải nhẹ: 3 hàng x 5 cột = 15 slots
+                $row = intval($index / 5) + 25; // Hàng 25
+                $col = ($index % 5);
                 return ['x' => $col, 'y' => $row];
 
             default:

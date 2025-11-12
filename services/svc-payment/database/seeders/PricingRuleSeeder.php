@@ -15,7 +15,7 @@ class PricingRuleSeeder extends Seeder
     public function run(): void
     {
         $now = now();
-        $lotId = DB::table('parking_lots')->value('id');
+        $lots = DB::table('parking_lots')->get();
 
         $pricingData = [
             'motorbike' => ['hourly' => 3000, 'daily_cap' => 10000, 'monthly_pass' => 150000],
@@ -24,18 +24,20 @@ class PricingRuleSeeder extends Seeder
             'light_truck' => ['hourly' => 20000, 'daily_cap' => 120000, 'monthly_pass' => 2500000]
         ];
 
-        foreach ($pricingData as $vehicleType => $pricing) {
-            PricingRule::create([
-                'parking_lot_id' => $lotId,
-                'vehicle_type' => $vehicleType,
-                'hourly' => $pricing['hourly'],
-                'daily_cap' => $pricing['daily_cap'],
-                'monthly_pass' => $pricing['monthly_pass'],
-                'peak_enabled' => true,
-                'peak_multiplier' => 1.5,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
+        foreach ($lots as $lot) {
+            foreach ($pricingData as $vehicleType => $pricing) {
+                PricingRule::create([
+                    'parking_lot_id' => $lot->id,
+                    'vehicle_type' => $vehicleType,
+                    'hourly' => $pricing['hourly'],
+                    'daily_cap' => $pricing['daily_cap'],
+                    'monthly_pass' => $pricing['monthly_pass'],
+                    'peak_enabled' => true,
+                    'peak_multiplier' => 1.5,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            }
         }
     }
 }

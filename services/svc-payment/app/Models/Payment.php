@@ -35,11 +35,17 @@ class Payment extends Model
         'vnp_transaction_no',
         'bank_code',
         'card_type',
-        'meta'
+        'meta',
+        'reservation_id'
     ];
 
     protected $casts = [
         'amount' => 'integer',
         'meta' => 'array',
     ];
+
+    public function reservation()
+    {
+        return $this->belongsTo(Reservation::class);
+    }
 }

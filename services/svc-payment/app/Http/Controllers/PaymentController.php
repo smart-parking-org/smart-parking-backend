@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\MonthlyPass;
 use App\Models\Payment;
+use App\Models\Reservation;
 use App\Models\Violation;
+use App\Services\ParkingFeeService;
 use App\Services\VnpayService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -25,13 +27,12 @@ class PaymentController extends Controller
      *   path="/payments/create",
      *   operationId="PaymentsCreate",
      *   tags={"Payments"},
-     *   summary="Tạo URL thanh toán VNPAY",
+     *   summary="Tạo URL thanh toán VNPAY cho reservation",
      *   @OA\RequestBody(
      *     required=true,
      *     @OA\JsonContent(
-     *       required={"order_id","amount"},
-     *       @OA\Property(property="order_id", type="string", example="INV-10001"),
-     *       @OA\Property(property="amount", type="integer", example=50000, minimum=1000),
+     *       required={"reservation_id"},
+     *       @OA\Property(property="reservation_id", type="integer", example=101),
      *       @OA\Property(property="bank_code", type="string", nullable=true, example="NCB")
      *     )
      *   ),
@@ -40,26 +41,117 @@ class PaymentController extends Controller
      *     description="Sinh link thanh toán thành công",
      *     @OA\JsonContent(
      *       @OA\Property(property="payUrl", type="string"),
-     *       @OA\Property(property="txnRef", type="string")
+     *       @OA\Property(property="txnRef", type="string"),
+     *       @OA\Property(property="payment_id", type="integer"),
+     *       @OA\Property(property="amount", type="integer", example=50000)
      *     )
      *   ),
-     *   @OA\Response(response=422, description="Validation error")
+     *   @OA\Response(response=404, description="Reservation not found"),
+     *   @OA\Response(response=422, description="Validation error hoặc reservation chưa check-in")
      * )
      */
     public function create(Request $r)
     {
         $r->validate([
-            'order_id' => 'required',
-            'amount' => 'required|integer|min:1000',
+            'reservation_id' => 'required|integer|exists:reservations,id',
         ]);
 
+        $reservation = Reservation::with('slot')->find($r->reservation_id);
+
+        if (!$reservation) {
+            return response()->json(['message' => 'Reservation not found'], 404);
+        }
+
+        // Chỉ cho phép thanh toán khi đã check-in
+        if (!$reservation->check_in_at) {
+            return response()->json([
+                'message' => 'Reservation chưa check-in, không thể thanh toán'
+            ], 422);
+        }
+
+        // Kiểm tra xem đã có payment PENDING cho reservation này chưa
+        $existingPayment = Payment::where('reservation_id', $r->reservation_id)
+            ->where('status', 'PENDING')
+            ->first();
+
+        if ($existingPayment) {
+            // Tính lại phí (có thể thay đổi nếu thời gian đã tăng)
+            $parkingLotId = $reservation->slot->parking_lot_id;
+            $vehicleType = $reservation->vehicle_snapshot['vehicle_type'] ?? 'motorbike';
+            $checkOutAt = $reservation->check_out_at ?? now();
+
+            $feeService = app(ParkingFeeService::class);
+            // $newAmount = $feeService->calculateFee(
+            //     $reservation->check_in_at,
+            //     $checkOutAt,
+            //     $parkingLotId,
+            //     $vehicleType
+            // );
+            $newAmount = 15000;
+
+            // Cập nhật amount nếu khác
+            if ($existingPayment->amount !== $newAmount) {
+                $existingPayment->update(['amount' => $newAmount]);
+            }
+
+            // Cập nhật meta với thời gian mới nhất
+            $existingMeta = is_array($existingPayment->meta) ? $existingPayment->meta : [];
+            $existingPayment->update([
+                'meta' => array_merge($existingMeta, [
+                    'type' => 'parking_fee',
+                    'reservation_id' => $reservation->id,
+                    'check_in_at' => $reservation->check_in_at->toIso8601String(),
+                    'check_out_at' => $checkOutAt->toIso8601String(),
+                ]),
+            ]);
+            $orderId = $reservation->reservation_code;
+
+            // Tạo URL thanh toán với payment đã tồn tại
+            $url = $this->vnp->createPaymentUrl([
+                'order_id' => $orderId,
+                'amount' => $existingPayment->amount,
+                'txn_ref' => $existingPayment->txn_ref,
+                'bank_code' => $r->bank_code,
+            ]);
+
+            return response()->json([
+                'payUrl' => $url,
+                'txnRef' => $existingPayment->txn_ref,
+                'payment_id' => $existingPayment->id,
+                'amount' => $existingPayment->amount,
+                'message' => 'Sử dụng payment đã tồn tại'
+            ]);
+        }
+
+        // Nếu chưa có payment PENDING, tính phí và tạo mới
+        $parkingLotId = $reservation->slot->parking_lot_id;
+        $vehicleType = $reservation->vehicle_snapshot['vehicle_type'] ?? 'motorbike';
+        $checkOutAt = $reservation->check_out_at ?? now();
+
+        $feeService = app(ParkingFeeService::class);
+        // $amount = $feeService->calculateFee(
+        //     $reservation->check_in_at,
+        //     $checkOutAt,
+        //     $parkingLotId,
+        //     $vehicleType
+        // );
+        $amount = 15000;
+
+        $orderId = $reservation->reservation_code;
         $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
 
         $p = Payment::create([
-            'order_id' => $r->order_id,
-            'amount' => $r->amount,
+            'order_id' => $orderId,
+            'amount' => $amount,
             'txn_ref' => $txnRef,
             'status' => 'PENDING',
+            'reservation_id' => $reservation->id,
+            'meta' => [
+                'type' => 'parking_fee',
+                'reservation_id' => $reservation->id,
+                'check_in_at' => $reservation->check_in_at->toIso8601String(),
+                'check_out_at' => $checkOutAt->toIso8601String(),
+            ],
         ]);
 
         $url = $this->vnp->createPaymentUrl([
@@ -69,7 +161,12 @@ class PaymentController extends Controller
             'bank_code' => $r->bank_code,
         ]);
 
-        return response()->json(['payUrl' => $url, 'txnRef' => $txnRef]);
+        return response()->json([
+            'payUrl' => $url,
+            'txnRef' => $txnRef,
+            'payment_id' => $p->id,
+            'amount' => $amount
+        ]);
     }
 
     /**
@@ -152,13 +249,13 @@ class PaymentController extends Controller
         if ($payment->status === 'PENDING') {
             $newStatus = ($params['vnp_ResponseCode'] === '00') ? 'PAID' : 'FAILED';
             $wasPaid = ($newStatus === 'PAID');
-            
+
             // Giữ nguyên meta cũ và merge thêm thông tin từ VNPay
             $existingMeta = is_array($payment->meta) ? $payment->meta : [];
             $mergedMeta = array_merge($existingMeta, [
                 'vnp_return' => $params,
             ]);
-            
+
             $payment->update([
                 'status' => $newStatus,
                 'vnp_response_code' => $params['vnp_ResponseCode'] ?? null,
@@ -178,6 +275,11 @@ class PaymentController extends Controller
                     $this->activateMonthlyPass($payment);
                 } elseif ($payment->meta['type'] === 'violation_fine') {
                     $this->resolveViolation($payment);
+                } elseif ($payment->meta['type'] === 'parking_fee') {
+                    Log::info('Parking fee paid successfully', [
+                        'payment_id' => $payment->id,
+                        'reservation_id' => $payment->meta['reservation_id'] ?? null,
+                    ]);
                 }
             }
         }
@@ -290,11 +392,156 @@ class PaymentController extends Controller
                     $this->activateMonthlyPass($payment);
                 } elseif ($payment->meta['type'] === 'violation_fine') {
                     $this->resolveViolation($payment);
+                } elseif ($payment->meta['type'] === 'parking_fee') {
+                    Log::info('Parking fee paid successfully', [
+                        'payment_id' => $payment->id,
+                        'reservation_id' => $payment->meta['reservation_id'] ?? null,
+                    ]);
                 }
             }
         }
 
         return response()->json(['RspCode' => '00', 'Message' => 'Confirm Success']);
+    }
+
+    /**
+     * @OA\Get(
+     *   path="/payments/status/{reservation_id}",
+     *   operationId="PaymentsStatus",
+     *   tags={"Payments"},
+     *   summary="Kiểm tra trạng thái thanh toán theo reservation (dùng cho mobile app sau khi quay lại từ webview)",
+     *   @OA\Parameter(
+     *     name="reservation_id",
+     *     in="path",
+     *     required=true,
+     *     description="ID của reservation",
+     *     @OA\Schema(type="integer", example=101)
+     *   ),
+     *   @OA\Response(
+     *     response=200,
+     *     description="Trạng thái thanh toán",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="status", type="string", enum={"PENDING","PAID","FAILED"}, example="PAID"),
+     *       @OA\Property(property="reservation_id", type="integer", example=101),
+     *       @OA\Property(property="order_id", type="string", example="RES-AB12CD34-20251019"),
+     *       @OA\Property(property="txn_ref", type="string", example="ORD20251018093000123"),
+     *       @OA\Property(property="amount", type="integer", example=50000),
+     *       @OA\Property(property="vnp_transaction_no", type="string", nullable=true),
+     *       @OA\Property(property="bank_code", type="string", nullable=true),
+     *       @OA\Property(property="card_type", type="string", nullable=true),
+     *       @OA\Property(property="message", type="string", example="Thanh toán thành công")
+     *     )
+     *   ),
+     *   @OA\Response(response=404, description="Payment not found")
+     * )
+     */
+    public function status(int $reservationId)
+    {
+        // Ưu tiên lấy payment PENDING hoặc PAID, nếu không có thì lấy payment mới nhất
+        $payment = Payment::where('reservation_id', $reservationId)
+            ->whereIn('status', ['PENDING', 'PAID'])
+            ->orderByDesc('created_at')
+            ->first();
+
+        // Nếu không có PENDING/PAID, lấy payment mới nhất (có thể là FAILED)
+        if (!$payment) {
+            $payment = Payment::where('reservation_id', $reservationId)
+                ->orderByDesc('created_at')
+                ->first();
+        }
+
+        if (!$payment) {
+            return response()->json(['message' => 'Payment not found'], 404);
+        }
+
+        $message = match ($payment->status) {
+            'PAID' => 'Thanh toán thành công',
+            'FAILED' => 'Thanh toán thất bại',
+            default => 'Đang chờ thanh toán',
+        };
+
+        return response()->json([
+            'status' => $payment->status,
+            'reservation_id' => $payment->reservation_id,
+            'order_id' => $payment->order_id,
+            'txn_ref' => $payment->txn_ref,
+            'amount' => $payment->amount,
+            'vnp_transaction_no' => $payment->vnp_transaction_no,
+            'bank_code' => $payment->bank_code,
+            'card_type' => $payment->card_type,
+            'message' => $message,
+        ]);
+    }
+
+    /**
+     * @OA\Get(
+     *   path="/payments/calculate/{reservation_id}",
+     *   operationId="PaymentsCalculate",
+     *   tags={"Payments"},
+     *   summary="Tính phí đỗ xe cho reservation",
+     *   description="Tính phí đỗ xe dựa trên thời gian check-in và check-out thực tế",
+     *   @OA\Parameter(
+     *     name="reservation_id",
+     *     in="path",
+     *     required=true,
+     *     description="ID của reservation",
+     *     @OA\Schema(type="integer")
+     *   ),
+     *   @OA\Response(
+     *     response=200,
+     *     description="Phí đỗ xe đã tính",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="reservation_id", type="integer", example=101),
+     *       @OA\Property(property="amount", type="integer", example=50000),
+     *       @OA\Property(property="check_in_at", type="string", format="date-time"),
+     *       @OA\Property(property="check_out_at", type="string", format="date-time", nullable=true),
+     *       @OA\Property(property="duration_minutes", type="integer", example=120),
+     *       @OA\Property(property="vehicle_type", type="string", example="motorbike"),
+     *       @OA\Property(property="parking_lot_id", type="integer", example=1)
+     *     )
+     *   ),
+     *   @OA\Response(response=404, description="Reservation not found"),
+     *   @OA\Response(response=422, description="Reservation chưa check-in hoặc không hợp lệ")
+     * )
+     */
+    public function calculate(int $reservationId)
+    {
+        $reservation = Reservation::with('slot')->find($reservationId);
+
+        if (!$reservation) {
+            return response()->json(['message' => 'Reservation not found'], 404);
+        }
+
+        // Chỉ tính phí khi đã check-in
+        if (!$reservation->check_in_at) {
+            return response()->json([
+                'message' => 'Reservation chưa check-in, không thể tính phí'
+            ], 422);
+        }
+
+        $parkingLotId = $reservation->slot->parking_lot_id;
+        $vehicleType = $reservation->vehicle_snapshot['vehicle_type'] ?? 'motorbike';
+        $checkOutAt = $reservation->check_out_at ?? now();
+
+        $feeService = app(ParkingFeeService::class);
+        $amount = $feeService->calculateFee(
+            $reservation->check_in_at,
+            $checkOutAt,
+            $parkingLotId,
+            $vehicleType
+        );
+
+        $durationMinutes = $reservation->check_in_at->diffInMinutes($checkOutAt);
+
+        return response()->json([
+            'reservation_id' => $reservation->id,
+            'amount' => $amount,
+            'check_in_at' => $reservation->check_in_at->toIso8601String(),
+            'check_out_at' => $checkOutAt->toIso8601String(),
+            'duration_minutes' => $durationMinutes,
+            'vehicle_type' => $vehicleType,
+            'parking_lot_id' => $parkingLotId,
+        ]);
     }
 
     /**
