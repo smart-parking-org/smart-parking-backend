@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Notification;
 use App\Models\Reservation;
 use App\Services\AuthService;
 use App\Traits\PushNotification;
@@ -40,10 +41,18 @@ class SendReservationHoldNotification extends Command
 
             $this->sendNotification(
                 $token,
-                '🕛 Giữ chỗ sắp hết',
+                'Giữ chỗ sắp hết',
                 'Còn 5 phút nữa lượt giữ chỗ của bạn sẽ hết hạn.',
-                ['type' => 'reservation_hold', 'reservation_id' => (string) $res->id]
             );
+
+            Notification::create([
+                'user_id' => $res->user_id,
+                'reservation_id' => $res->id ?? null,
+                'type' => 'reservation_hold_expiring',
+                'title' => 'Giữ chỗ sắp hết',
+                'body' => 'Còn 5 phút nữa lượt giữ chỗ của bạn sẽ hết hạn.',
+                'is_read' => false,
+            ]);
         }
         return self::SUCCESS;
     }

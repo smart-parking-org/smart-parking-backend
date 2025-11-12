@@ -36,7 +36,8 @@ class Payment extends Model
         'vnp_transaction_no',
         'bank_code',
         'card_type',
-        'meta'
+        'meta',
+        'reservation_id'
     ];
 
     protected $casts = [

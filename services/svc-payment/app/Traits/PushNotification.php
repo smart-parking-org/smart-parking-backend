@@ -12,17 +12,17 @@ trait PushNotification
     public function sendNotification($token, $title, $body, $data = [])
     {
         $fcmurl = config('services.firebase.fcm_url');
-        $stringData = [];
-        foreach ($data as $key => $value) {
-            $stringData[$key] = is_string($value) ? $value : json_encode($value);
-        }
+        // $stringData = [];
+        // foreach ($data as $key => $value) {
+        //     $stringData[$key] = is_string($value) ? $value : json_encode($value);
+        // }
 
         $notification = [
             'notification' => [
                 'title' => $title,
                 'body' => $body
             ],
-            'data' => $stringData,
+            // 'data' => $stringData,
             'token' => $token
         ];
 

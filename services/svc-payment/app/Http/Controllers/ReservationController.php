@@ -6,8 +6,13 @@ use App\Models\CheckoutCode;
 use App\Models\ExtensionPolicy;
 use App\Models\Payment;
 use App\Models\PeakHour;
+use App\Models\ExtensionPolicy;
+use App\Models\Payment;
 use App\Services\AuthService;
+use App\Services\ParkingFeeService;
 use App\Services\PriorityQueueSlotAllocationService;
+use App\Services\VnpayService;
+use App\Traits\PushNotification;
 use Carbon\Carbon;
 use App\Models\Reservation;
 use Http;
@@ -28,6 +33,7 @@ use App\Http\Requests\Reservation\ReservationStoreRequest;
  */
 class ReservationController extends Controller
 {
+    use PushNotification;
     private AuthService $authService;
 
     public function __construct(AuthService $authService)
@@ -817,7 +823,6 @@ class ReservationController extends Controller
         ]);
     }
 
-
     /**
      * @OA\Put(
      *     path="/reservations/{id}/check-in",
@@ -1185,6 +1190,241 @@ class ReservationController extends Controller
             'success' => true,
             'message' => "Đã hết hạn {$expiredCount} reservations",
             'data' => ['expired_count' => $expiredCount]
+        ]);
+    }
+
+    /**
+     * @OA\Get(
+     *     path="/reservations/user/{user_id}/history",
+     *     tags={"🎫 Reservations"},
+     *     summary="Lấy toàn bộ lịch sử đặt chỗ của người dùng",
+     *     description="Lấy lịch sử đặt chỗ đầy đủ thông tin bao gồm: thông tin bãi đỗ, slot, trạng thái thanh toán, và các thông tin chi tiết khác",
+     *     @OA\Parameter(
+     *         name="user_id",
+     *         in="path",
+     *         required=true,
+     *         description="ID của người dùng",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="status",
+     *         in="query",
+     *         required=false,
+     *         description="Filter theo trạng thái",
+     *         @OA\Schema(type="string", enum={"confirmed","checked_in","checked_out","cancelled","expired"})
+     *     ),
+     *     @OA\Parameter(
+     *         name="date_from",
+     *         in="query",
+     *         required=false,
+     *         description="Từ ngày (ISO 8601)",
+     *         @OA\Schema(type="string", format="date-time")
+     *     ),
+     *     @OA\Parameter(
+     *         name="date_to",
+     *         in="query",
+     *         required=false,
+     *         description="Đến ngày (ISO 8601)",
+     *         @OA\Schema(type="string", format="date-time")
+     *     ),
+     *     @OA\Parameter(
+     *         name="page",
+     *         in="query",
+     *         required=false,
+     *         description="Trang hiện tại",
+     *         @OA\Schema(type="integer", default=1)
+     *     ),
+     *     @OA\Parameter(
+     *         name="per_page",
+     *         in="query",
+     *         required=false,
+     *         description="Số bản ghi mỗi trang",
+     *         @OA\Schema(type="integer", default=15)
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Lịch sử đặt chỗ",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="object",
+     *                 @OA\Property(
+     *                     property="reservations",
+     *                     type="array",
+     *                     @OA\Items(
+     *                         type="object",
+     *                         @OA\Property(property="id", type="integer", example=101),
+     *                         @OA\Property(property="reservation_code", type="string", example="RES-AB12CD34-20251019"),
+     *                         @OA\Property(property="status", type="string", example="checked_out"),
+     *                         @OA\Property(property="start_time", type="string", format="date-time"),
+     *                         @OA\Property(property="end_time", type="string", format="date-time"),
+     *                         @OA\Property(property="expires_at", type="string", format="date-time", nullable=true),
+     *                         @OA\Property(property="check_in_at", type="string", format="date-time", nullable=true),
+     *                         @OA\Property(property="check_out_at", type="string", format="date-time", nullable=true),
+     *                         @OA\Property(property="cancelled_at", type="string", format="date-time", nullable=true),
+     *                         @OA\Property(property="duration_minutes", type="integer", nullable=true, example=150),
+     *                         @OA\Property(property="extension_count", type="integer", example=0),
+     *                         @OA\Property(
+     *                             property="slot",
+     *                             type="object",
+     *                             @OA\Property(property="id", type="integer", example=55),
+     *                             @OA\Property(property="slot_code", type="string", example="C4-012"),
+     *                             @OA\Property(property="vehicle_type", type="string", example="car_4_seat"),
+     *                             @OA\Property(property="status", type="string", example="available"),
+     *                             @OA\Property(
+     *                                 property="parking_lot",
+     *                                 type="object",
+     *                                 @OA\Property(property="id", type="integer", example=1),
+     *                                 @OA\Property(property="name", type="string", example="Tầng hầm B1"),
+     *                                 @OA\Property(property="gate_pos_x", type="number", example=10.806176400733412),
+     *                                 @OA\Property(property="gate_pos_y", type="number", example=106.6286676510779)
+     *                             )
+     *                         ),
+     *                         @OA\Property(
+     *                             property="user_snapshot",
+     *                             type="object",
+     *                             @OA\Property(property="id", type="integer", example=12),
+     *                             @OA\Property(property="name", type="string", example="Nguyễn Văn A"),
+     *                             @OA\Property(property="email", type="string", example="user@example.com"),
+     *                             @OA\Property(property="phone", type="string", example="0123456789")
+     *                         ),
+     *                         @OA\Property(
+     *                             property="vehicle_snapshot",
+     *                             type="object",
+     *                             @OA\Property(property="id", type="integer", example=34),
+     *                             @OA\Property(property="license_plate", type="string", example="29A-12345"),
+     *                             @OA\Property(property="vehicle_type", type="string", example="motorbike")
+     *                         ),
+     *                         @OA\Property(
+     *                             property="pricing_snapshot",
+     *                             type="object",
+     *                             @OA\Property(property="id", type="integer", example=1),
+     *                             @OA\Property(property="vehicle_type", type="string", example="car_4_seat"),
+     *                             @OA\Property(property="hourly", type="integer", example=5000),
+     *                             @OA\Property(property="daily_cap", type="integer", example=50000),
+     *                             @OA\Property(property="monthly_pass", type="integer", example=300000)
+     *                         ),
+     *                         @OA\Property(
+     *                             property="payment",
+     *                             type="object",
+     *                             nullable=true,
+     *                             @OA\Property(property="id", type="integer", example=1),
+     *                             @OA\Property(property="order_id", type="string", example="RES-AB12CD34-20251019"),
+     *                             @OA\Property(property="amount", type="integer", example=50000),
+     *                             @OA\Property(property="status", type="string", enum={"PENDING","PAID","FAILED"}, example="PAID"),
+     *                             @OA\Property(property="txn_ref", type="string", example="ORD20251018093000123"),
+     *                             @OA\Property(property="created_at", type="string", format="date-time")
+     *                         ),
+     *                         @OA\Property(property="created_at", type="string", format="date-time"),
+     *                         @OA\Property(property="updated_at", type="string", format="date-time")
+     *                     )
+     *                 ),
+     *                 @OA\Property(
+     *                     property="pagination",
+     *                     type="object",
+     *                     @OA\Property(property="current_page", type="integer", example=1),
+     *                     @OA\Property(property="per_page", type="integer", example=15),
+     *                     @OA\Property(property="total", type="integer", example=45),
+     *                     @OA\Property(property="last_page", type="integer", example=3)
+     *                 ),
+     *                 @OA\Property(
+     *                     property="summary",
+     *                     type="object",
+     *                     @OA\Property(property="total_reservations", type="integer", example=45),
+     *                     @OA\Property(property="confirmed", type="integer", example=2),
+     *                     @OA\Property(property="checked_in", type="integer", example=5),
+     *                     @OA\Property(property="checked_out", type="integer", example=30),
+     *                     @OA\Property(property="cancelled", type="integer", example=5),
+     *                     @OA\Property(property="expired", type="integer", example=3),
+     *                     @OA\Property(property="total_paid", type="integer", example=1500000),
+     *                     @OA\Property(property="total_pending", type="integer", example=50000)
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Không tìm thấy user"
+     *     )
+     * )
+     */
+    public function getUserHistory(Request $request, $userId)
+    {
+        $query = Reservation::with(['slot.parkingLot'])
+            ->where('user_id', $userId);
+
+        // Filter theo status
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        // Filter theo date range
+        if ($request->filled('date_from')) {
+            $query->where('created_at', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $query->where('created_at', '<=', $request->date_to);
+        }
+
+        // Sort mặc định: mới nhất trước
+        $query->orderByDesc('created_at');
+
+        // Pagination
+        $perPage = $request->get('per_page', 15);
+        $reservations = $query->paginate($perPage);
+
+        // Lấy thông tin payment cho mỗi reservation
+        $reservations->getCollection()->transform(function ($reservation) {
+            // Tìm payment theo order_id (có thể là reservation_code) hoặc trong meta
+            $payment = Payment::where('order_id', $reservation->reservation_code)
+                ->orWhere(function ($q) use ($reservation) {
+                    $q->whereJsonContains('meta->reservation_id', $reservation->id);
+                })
+                ->orderByDesc('created_at')
+                ->first();
+
+            // Thêm payment vào reservation
+            $reservation->payment = $payment;
+
+            return $reservation;
+        });
+
+        // Summary statistics
+        $summaryQuery = Reservation::where('user_id', $userId);
+        $summary = [
+            'total_reservations' => $summaryQuery->count(),
+            'confirmed' => $summaryQuery->clone()->where('status', 'confirmed')->count(),
+            'checked_in' => $summaryQuery->clone()->where('status', 'checked_in')->count(),
+            'checked_out' => $summaryQuery->clone()->where('status', 'checked_out')->count(),
+            'cancelled' => $summaryQuery->clone()->where('status', 'cancelled')->count(),
+            'expired' => $summaryQuery->clone()->where('status', 'expired')->count(),
+        ];
+
+        // Tính tổng tiền đã thanh toán và đang chờ
+        $paidPayments = Payment::whereIn('order_id', $reservations->pluck('reservation_code'))
+            ->where('status', 'PAID')
+            ->sum('amount');
+
+        $pendingPayments = Payment::whereIn('order_id', $reservations->pluck('reservation_code'))
+            ->where('status', 'PENDING')
+            ->sum('amount');
+
+        $summary['total_paid'] = (int) $paidPayments;
+        $summary['total_pending'] = (int) $pendingPayments;
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'reservations' => $reservations->items(),
+                'pagination' => [
+                    'current_page' => $reservations->currentPage(),
+                    'per_page' => $reservations->perPage(),
+                    'total' => $reservations->total(),
+                    'last_page' => $reservations->lastPage(),
+                ],
+                'summary' => $summary
+            ]
         ]);
     }
 

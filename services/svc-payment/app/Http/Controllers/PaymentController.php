@@ -6,6 +6,11 @@ use App\Models\CheckoutCode;
 use App\Models\MonthlyPass;
 use App\Models\Payment;
 use App\Models\Violation;
+use App\Models\MonthlyPass;
+use App\Models\Payment;
+use App\Models\Reservation;
+use App\Models\Violation;
+use App\Services\ParkingFeeService;
 use App\Services\VnpayService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -27,7 +32,7 @@ class PaymentController extends Controller
      *   path="/payments/create",
      *   operationId="PaymentsCreate",
      *   tags={"Payments"},
-     *   summary="Tạo URL thanh toán VNPAY",
+     *   summary="Tạo URL thanh toán VNPAY cho reservation",
      *   @OA\RequestBody(
      *     required=true,
      *     @OA\JsonContent(
@@ -43,10 +48,13 @@ class PaymentController extends Controller
      *     description="Sinh link thanh toán thành công",
      *     @OA\JsonContent(
      *       @OA\Property(property="payUrl", type="string"),
-     *       @OA\Property(property="txnRef", type="string")
+     *       @OA\Property(property="txnRef", type="string"),
+     *       @OA\Property(property="payment_id", type="integer"),
+     *       @OA\Property(property="amount", type="integer", example=50000)
      *     )
      *   ),
-     *   @OA\Response(response=422, description="Validation error")
+     *   @OA\Response(response=404, description="Reservation not found"),
+     *   @OA\Response(response=422, description="Validation error hoặc reservation chưa check-in")
      * )
      */
     public function create(Request $r)
@@ -57,6 +65,88 @@ class PaymentController extends Controller
             'reservation_id' => 'nullable|integer|exists:reservations,id', // ✅ Thêm validation
         ]);
 
+        $reservation = Reservation::with('slot')->find($r->reservation_id);
+
+        if (!$reservation) {
+            return response()->json(['message' => 'Reservation not found'], 404);
+        }
+
+        // Chỉ cho phép thanh toán khi đã check-in
+        if (!$reservation->check_in_at) {
+            return response()->json([
+                'message' => 'Reservation chưa check-in, không thể thanh toán'
+            ], 422);
+        }
+
+        // Kiểm tra xem đã có payment PENDING cho reservation này chưa
+        $existingPayment = Payment::where('reservation_id', $r->reservation_id)
+            ->where('status', 'PENDING')
+            ->first();
+
+        if ($existingPayment) {
+            // Tính lại phí (có thể thay đổi nếu thời gian đã tăng)
+            $parkingLotId = $reservation->slot->parking_lot_id;
+            $vehicleType = $reservation->vehicle_snapshot['vehicle_type'] ?? 'motorbike';
+            $checkOutAt = $reservation->check_out_at ?? now();
+
+            $feeService = app(ParkingFeeService::class);
+            // $newAmount = $feeService->calculateFee(
+            //     $reservation->check_in_at,
+            //     $checkOutAt,
+            //     $parkingLotId,
+            //     $vehicleType
+            // );
+            $newAmount = 15000;
+
+            // Cập nhật amount nếu khác
+            if ($existingPayment->amount !== $newAmount) {
+                $existingPayment->update(['amount' => $newAmount]);
+            }
+
+            // Cập nhật meta với thời gian mới nhất
+            $existingMeta = is_array($existingPayment->meta) ? $existingPayment->meta : [];
+            $existingPayment->update([
+                'meta' => array_merge($existingMeta, [
+                    'type' => 'parking_fee',
+                    'reservation_id' => $reservation->id,
+                    'check_in_at' => $reservation->check_in_at->toIso8601String(),
+                    'check_out_at' => $checkOutAt->toIso8601String(),
+                ]),
+            ]);
+            $orderId = $reservation->reservation_code;
+
+            // Tạo URL thanh toán với payment đã tồn tại
+            $url = $this->vnp->createPaymentUrl([
+                'order_id' => $orderId,
+                'amount' => $existingPayment->amount,
+                'txn_ref' => $existingPayment->txn_ref,
+                'bank_code' => $r->bank_code,
+            ]);
+
+            return response()->json([
+                'payUrl' => $url,
+                'txnRef' => $existingPayment->txn_ref,
+                'payment_id' => $existingPayment->id,
+                'amount' => $existingPayment->amount,
+                'message' => 'Sử dụng payment đã tồn tại'
+            ]);
+        }
+
+        // Nếu chưa có payment PENDING, tính phí và tạo mới
+        $parkingLotId = $reservation->slot->parking_lot_id;
+        $vehicleType = $reservation->vehicle_snapshot['vehicle_type'] ?? 'motorbike';
+        $checkOutAt = $reservation->check_out_at ?? now();
+
+        $feeService = app(ParkingFeeService::class);
+        // $amount = $feeService->calculateFee(
+        //     $reservation->check_in_at,
+        //     $checkOutAt,
+        //     $parkingLotId,
+        //     $vehicleType
+        // );
+        $amount = 15000;
+
+        $orderId = $reservation->reservation_code;
         $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
 
         $p = Payment::create([
@@ -65,6 +155,13 @@ class PaymentController extends Controller
             'amount' => $r->amount,
             'txn_ref' => $txnRef,
             'status' => 'PENDING',
+            'reservation_id' => $reservation->id,
+            'meta' => [
+                'type' => 'parking_fee',
+                'reservation_id' => $reservation->id,
+                'check_in_at' => $reservation->check_in_at->toIso8601String(),
+                'check_out_at' => $checkOutAt->toIso8601String(),
+            ],
         ]);
 
         $url = $this->vnp->createPaymentUrl([
@@ -74,7 +171,12 @@ class PaymentController extends Controller
             'bank_code' => $r->bank_code,
         ]);
 
-        return response()->json(['payUrl' => $url, 'txnRef' => $txnRef]);
+        return response()->json([
+            'payUrl' => $url,
+            'txnRef' => $txnRef,
+            'payment_id' => $p->id,
+            'amount' => $amount
+        ]);
     }
 
     /**

@@ -196,8 +196,6 @@ class ParkingLotController extends Controller
             @ob_flush();
             @flush();
 
-            $lastHash = null;
-            $keepAliveCount = 0;
 
             // Chạy 30 phút (1800 lần * 2s = 3600s)
             for ($i = 0; $i < 1800; $i++) {
@@ -212,64 +210,16 @@ class ParkingLotController extends Controller
                     ->orderBy('id')
                     ->get();
 
-                $summary = [
-                    'total' => $slots->count(),
-                    'available' => $slots->where('effective_status', 'available')->count(),
-                    'hold' => $slots->where('effective_status', 'hold')->count(),
-                    'occupied' => $slots->where('effective_status', 'occupied')->count(),
+                $payload = [
+                    'type' => 'slot_snapshot',
+                    'slots' => $slots->toArray(),
+                    'lasted_updated' => now()->toIso8601String()
                 ];
 
-                $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
-                $byVehicleType = [];
-                foreach ($vehicleTypes as $type) {
-                    $typeSlots = $slots->where('vehicle_type', $type);
-                    $byVehicleType[$type] = [
-                        'total' => $typeSlots->count(),
-                        'available' => $typeSlots->where('effective_status', 'available')->count(),
-                        'hold' => $typeSlots->where('effective_status', 'hold')->count(),
-                        'occupied' => $typeSlots->where('effective_status', 'occupied')->count(),
-                    ];
-                }
-
-                // Tạo hash từ dữ liệu quan trọng thay vì serialize toàn bộ
-                $dataHash = md5(json_encode([
-                    'summary' => $summary,
-                    'by_vehicle_type' => $byVehicleType,
-                    'slots_status' => $slots->pluck('effective_status', 'id')->toArray()
-                ]));
-                if ($dataHash !== $lastHash) {
-                    $payload = [
-                        'type' => 'slot_snapshot',
-                        'parking_lot' => [
-                            'id' => $lot->id,
-                            'name' => $lot->name,
-                            'gate_pos_x' => $lot->gate_pos_x,
-                            'gate_pos_y' => $lot->gate_pos_y
-                        ],
-                        'slots' => $slots->toArray(), // Convert to array để đảm bảo consistency
-                        'summary' => $summary,
-                        'by_vehicle_type' => $byVehicleType,
-                        'timestamp' => now()->timestamp,
-                        'lasted_updated' => now()->toIso8601String()
-                    ];
-
-                    echo "event: message\n";
-                    echo 'data: ' . json_encode($payload) . "\n\n";
-                    @ob_flush();
-                    @flush();
-
-                    $lastHash = $dataHash;
-                    $keepAliveCount = 0;
-                } else {
-                    // Gửi keepalive mỗi 10 lần (20 giây) để duy trì connection
-                    $keepAliveCount++;
-                    if ($keepAliveCount >= 10) {
-                        echo ": keepalive\n\n";
-                        @ob_flush();
-                        @flush();
-                        $keepAliveCount = 0;
-                    }
-                }
+                echo "event: message\n";
+                echo 'data: ' . json_encode($payload) . "\n\n";
+                @ob_flush();
+                @flush();
 
                 usleep(2000000); // 2s (giảm tải DB)
             }

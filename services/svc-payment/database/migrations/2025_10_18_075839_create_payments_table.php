@@ -21,8 +21,12 @@ return new class extends Migration {
             $table->string('bank_code')->nullable();
             $table->string('card_type')->nullable();
             $table->json('meta')->nullable();
+            // Thêm foreign key để liên kết với reservation
+            $table->foreignId('reservation_id')->nullable()
+                ->constrained('reservations', 'id')->nullOnDelete();
             $table->timestamps();
             $table->index(['order_id', 'status']);
+            $table->index(['reservation_id', 'status']);
         });
         ;
     }
