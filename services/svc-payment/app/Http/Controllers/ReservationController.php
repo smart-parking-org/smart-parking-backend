@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\CheckoutCode;
 use App\Models\ExtensionPolicy;
+use App\Models\MonthlyPass;
 use App\Models\Payment;
 use App\Models\PeakHour;
 use App\Services\AuthService;
@@ -410,6 +411,7 @@ class ReservationController extends Controller
         if ($vehicleId) {
             $vehicleCheck = $this->authService->checkVehicleExists($vehicleId);
             if (!$vehicleCheck['exists']) {
+                \Log::info('Loi 1');
                 return response()->json([
                     'success' => false,
                     'message' => 'Phương tiện không tồn tại'
@@ -417,6 +419,8 @@ class ReservationController extends Controller
             }
 
             if (!$vehicleCheck['is_active']) {
+                \Log::info('Loi 2');
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Phương tiện đã bị khóa'
@@ -426,6 +430,8 @@ class ReservationController extends Controller
             // Kiểm tra vehicle có thuộc về user không
             $vehicleData = $vehicleCheck['data'];
             if ($vehicleData['user']['id'] !== $userId) {
+                \Log::info('Loi 3');
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Phương tiện không thuộc về người dùng này'
@@ -437,6 +443,8 @@ class ReservationController extends Controller
                 ->whereIn('status', ['confirmed', 'checked_in', 'pending_checkout'])
                 ->exists();
             if ($hasActiveReservationByVehicle) {
+                \Log::info('Loi 4');
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Xe này đang có đặt chỗ đang hiệu lực'
@@ -451,6 +459,8 @@ class ReservationController extends Controller
                 ->whereIn('status', ['confirmed', 'checked_in', 'pending_checkout'])
                 ->count();
             if ($activeCount >= $MAX_ACTIVE_PER_USER) {
+                \Log::info('Loi 5');
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Bạn đã đạt giới hạn số lượt đặt đang hiệu lực'
@@ -479,6 +489,8 @@ class ReservationController extends Controller
 
                 if (!$allocatedSlot) {
                     $reservationRequest->update(['status' => 'failed']);
+                    \Log::info('Loi 6');
+
                     return response()->json([
                         'success' => false,
                         'message' => 'Không có chỗ trống phù hợp với loại xe này'
@@ -490,11 +502,21 @@ class ReservationController extends Controller
                 $end = $start->copy()->addMinutes($duration);
                 if (TimeOverlapService::hasOverlapOnSlot($allocatedSlot->id, $start, $end)) {
                     $reservationRequest->update(['status' => 'failed']);
+                    \Log::info('Loi 7');
+
                     return response()->json([
                         'success' => false,
                         'message' => 'Khung giờ đã bị trùng, vui lòng thử lại'
                     ], 422);
                 }
+
+                // ✅ Kiểm tra monthly pass
+                $monthlyPass = MonthlyPass::findValidPass(
+                    $userId,
+                    $vehicleId,
+                    $parkingLotId,
+                    $start->toDateString()
+                );
 
                 // 4. Tạo Reservation (confirmed) + giữ chỗ 15 phút
                 $reservation = Reservation::create([
@@ -523,6 +545,12 @@ class ReservationController extends Controller
                         'algorithm_used' => $algorithm,
                         'processing_time_ms' => $reservationRequest->processing_time_ms,
                         'qr_payload' => $reservation->reservation_code, // dùng làm QR
+                        'monthly_pass' => $monthlyPass && $monthlyPass->isValid($start->toDateString()) ? [
+                            'id' => $monthlyPass->id,
+                            'order_id' => $monthlyPass->order_id,
+                            'end_date' => $monthlyPass->end_date?->toDateString(),
+                            'message' => 'Vé tháng của bạn sẽ được áp dụng khi checkout (miễn phí)',
+                        ] : null,
                     ]
                 ], 201);
             }
@@ -951,24 +979,36 @@ class ReservationController extends Controller
 
         $paymentMethod = $request->input('payment_method', 'online'); // Mặc định là online
 
+        // ✅ Kiểm tra monthly pass trước khi tính phí
+        $monthlyPass = MonthlyPass::findValidPass(
+            $reservation->user_id,
+            $reservation->vehicle_id,
+            $reservation->slot->parking_lot_id,
+            $reservation->check_in_at ? $reservation->check_in_at->toDateString() : null
+        );
+
+        $hasMonthlyPass = $monthlyPass && $monthlyPass->isValid($reservation->check_in_at);
+
         // Tính toán giá tiền dựa trên pricing snapshot
         $amount = $this->calculatePaymentAmount($reservation);
 
-        // Tạo Payment
+        // Tạo Payment (nếu có monthly pass thì amount = 0, nhưng vẫn tạo payment record)
         $payment = Payment::create([
             'order_id' => $reservation->reservation_code,
             'reservation_id' => $reservation->id,
             'amount' => $amount,
             'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
-            'status' => 'PENDING',
+            'status' => $hasMonthlyPass ? 'PAID' : 'PENDING', // Nếu có monthly pass thì tự động PAID
             'meta' => [
                 'payment_method' => $paymentMethod,
+                'monthly_pass_id' => $hasMonthlyPass ? $monthlyPass->id : null,
+                'is_free' => $hasMonthlyPass,
             ],
         ]);
 
-        // Xác định status dựa trên payment method
-        if ($paymentMethod === 'offline') {
-            // Thanh toán trực tiếp → checked_out ngay
+        // Xác định status dựa trên payment method và monthly pass
+        if ($hasMonthlyPass || $paymentMethod === 'offline') {
+            // Có monthly pass hoặc thanh toán trực tiếp → checked_out ngay
             $newStatus = 'checked_out';
             $reservation->slot->update(['status' => 'available']);
             $this->finalizeRequestIfAny($reservation);
@@ -984,22 +1024,46 @@ class ReservationController extends Controller
             'payment_id' => $payment->id,
         ]);
 
+        $message = $hasMonthlyPass
+            ? 'Check-out thành công. Vé tháng của bạn đã được áp dụng (miễn phí).'
+            : ($paymentMethod === 'offline'
+                ? 'Check-out thành công (thanh toán trực tiếp)'
+                : 'Check-out thành công. Vui lòng thanh toán để nhận mã QR checkout.');
+
         return response()->json([
             'success' => true,
-            'message' => $paymentMethod === 'offline'
-                ? 'Check-out thành công (thanh toán trực tiếp)'
-                : 'Check-out thành công. Vui lòng thanh toán để nhận mã QR checkout.',
+            'message' => $message,
             'data' => [
                 'reservation' => $reservation,
                 'payment' => $payment,
                 'amount' => $amount,
                 'payment_method' => $paymentMethod,
+                'monthly_pass' => $hasMonthlyPass ? [
+                    'id' => $monthlyPass->id,
+                    'order_id' => $monthlyPass->order_id,
+                    'end_date' => $monthlyPass->end_date?->toDateString(),
+                ] : null,
+                'is_free' => $hasMonthlyPass,
             ]
         ]);
     }
 
     private function calculatePaymentAmount(Reservation $reservation): int
     {
+        // ✅ Kiểm tra monthly pass trước - nếu có thì miễn phí
+        $monthlyPass = MonthlyPass::findValidPass(
+            $reservation->user_id,
+            $reservation->vehicle_id,
+            $reservation->slot->parking_lot_id,
+            $reservation->check_in_at ? $reservation->check_in_at->toDateString() : null
+        );
+
+        if ($monthlyPass && $monthlyPass->isValid($reservation->check_in_at)) {
+            // Có vé tháng hợp lệ → miễn phí
+            return 0;
+        }
+
+        // Nếu không có monthly pass, tính phí bình thường
         $pricing = $reservation->pricing_snapshot;
 
         if (!$pricing || empty($pricing['hourly'])) {

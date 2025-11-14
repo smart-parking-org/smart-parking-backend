@@ -93,6 +93,8 @@ Route::prefix('monthly-passes')->group(function () {
     Route::get('/mine', [MonthlyPassController::class, 'mine']);         // Danh sách vé tháng của user
     Route::get('/{id}', [MonthlyPassController::class, 'show']);         // Chi tiết vé tháng
     Route::put('/{id}/cancel', [MonthlyPassController::class, 'cancel']); // Hủy vé tháng (chỉ khi PENDING)
+    Route::post('/{id}/create-payment', [MonthlyPassController::class, 'createPayment']); // Tạo URL thanh toán cho vé tháng PENDING
+    Route::post('/expire-due', [MonthlyPassController::class, 'expireDue']);
 });
 
 // Violations - Tích hợp với Users (Yêu cầu đề tài: Quản lý cư dân - lịch sử vi phạm)
@@ -155,6 +157,7 @@ Route::prefix('monthly-passes')->group(function () {
     Route::get('/mine', [MonthlyPassController::class, 'mine']);         // Danh sách vé tháng của user
     Route::get('/{id}', [MonthlyPassController::class, 'show']);         // Chi tiết vé tháng
     Route::put('/{id}/cancel', [MonthlyPassController::class, 'cancel']); // Hủy vé tháng (chỉ khi PENDING)
+    Route::post('/{id}/create-payment', [MonthlyPassController::class, 'createPayment']); // Tạo URL thanh toán cho vé tháng PENDING
 });
 
 // Violations - Tích hợp với Users (Yêu cầu đề tài: Quản lý cư dân - lịch sử vi phạm)

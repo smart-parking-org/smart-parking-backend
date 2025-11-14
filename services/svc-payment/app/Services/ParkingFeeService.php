@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\MonthlyPass;
 use App\Models\PricingRule;
 use App\Models\PeakHour;
 use Carbon\Carbon;
@@ -11,19 +12,38 @@ class ParkingFeeService
 {
     /**
      * Tính tiền đỗ xe dựa trên thời gian check-in và check-out
+     * Có kiểm tra monthly pass - nếu có thì trả về 0
      *
      * @param Carbon $checkInAt Thời gian check-in
      * @param Carbon $checkOutAt Thời gian check-out
      * @param int $parkingLotId ID bãi đỗ xe
      * @param string $vehicleType Loại xe (motorbike, car_4_seat, car_7_seat, light_truck)
+     * @param int|null $userId User ID (để kiểm tra monthly pass)
+     * @param int|null $vehicleId Vehicle ID (để kiểm tra monthly pass)
      * @return int Số tiền (VND)
      */
     public function calculateFee(
         Carbon $checkInAt,
         Carbon $checkOutAt,
         int $parkingLotId,
-        string $vehicleType
+        string $vehicleType,
+        ?int $userId = null,
+        ?int $vehicleId = null
     ): int {
+        // ✅ Kiểm tra monthly pass nếu có userId và vehicleId
+        if ($userId && $vehicleId) {
+            $monthlyPass = MonthlyPass::findValidPass(
+                $userId,
+                $vehicleId,
+                $parkingLotId,
+                $checkInAt->toDateString()
+            );
+
+            if ($monthlyPass && $monthlyPass->isValid($checkInAt)) {
+                // Có vé tháng hợp lệ → miễn phí
+                return 0;
+            }
+        }
         // Lấy pricing rule
         $pricingRule = PricingRule::where('parking_lot_id', $parkingLotId)
             ->where('vehicle_type', $vehicleType)

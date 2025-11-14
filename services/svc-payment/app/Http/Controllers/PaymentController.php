@@ -350,6 +350,19 @@ class PaymentController extends Controller
         // Tạo deep link
         $deepLink = "smartparking://payment/result?status={$status}&txn_ref={$payment->txn_ref}&order_id={$payment->order_id}&reservation_id={$payment->reservation_id}";
 
+        // ✅ Thêm monthly_pass_id vào deep link nếu có
+        if ($payment->meta && isset($payment->meta['monthly_pass_id'])) {
+            $deepLink .= "&monthly_pass_id=" . $payment->meta['monthly_pass_id'];
+        } else {
+            // ✅ Fallback: Nếu order_id bắt đầu bằng "MP-", tìm monthly pass theo order_id
+            if (str_starts_with($payment->order_id, 'MP-')) {
+                $monthlyPass = MonthlyPass::where('order_id', $payment->order_id)->first();
+                if ($monthlyPass) {
+                    $deepLink .= "&monthly_pass_id=" . $monthlyPass->id;
+                }
+            }
+        }
+
         // ✅ Return view với data
         return view('payment.return', [
             'title' => $title,
