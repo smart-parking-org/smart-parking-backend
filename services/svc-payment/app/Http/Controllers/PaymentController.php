@@ -271,7 +271,7 @@ class PaymentController extends Controller
             $newStatus = ($params['vnp_ResponseCode'] === '00') ? 'PAID' : 'FAILED';
             $wasPaid = ($newStatus === 'PAID');
 
-            // Giữ nguyên meta cũ và merge thêm thông tin từ VNPay
+            // Giữ nguyên và merge thêm thông tin từ VNPay
             $existingMeta = is_array($payment->meta) ? $payment->meta : [];
             $mergedMeta = array_merge($existingMeta, [
                 'vnp_return' => $params,
@@ -289,7 +289,7 @@ class PaymentController extends Controller
 
         // Xử lý các loại payment sau khi thanh toán thành công
         if ($wasPaid) {
-            // Reload payment để lấy meta đã được update
+            // Reload payment 
             $payment->refresh();
             if ($payment->meta && isset($payment->meta['type'])) {
                 if ($payment->meta['type'] === 'monthly_pass') {
@@ -299,41 +299,15 @@ class PaymentController extends Controller
                 }
             }
 
-            // ✅ Tạo QR checkout code khi thanh toán reservation thành công (trong return URL)
-            $reservation = null;
+            // ✅ Chuyển reservation từ pending_payment → pending_checkout nếu có reservation
             if ($payment->reservation_id) {
                 $reservation = Reservation::find($payment->reservation_id);
-            } else {
-                // Fallback: tìm theo order_id (reservation_code)
-                $reservation = Reservation::where('reservation_code', $payment->order_id)->first();
-            }
-
-            if ($reservation && $reservation->status === 'pending_checkout') {
-                try {
-                    // Kiểm tra xem đã có checkout_code chưa (tránh tạo trùng nếu IPN đã tạo trước)
-                    $existingCode = CheckoutCode::where('reservation_id', $reservation->id)
-                        ->where('status', 'active')
-                        ->first();
-
-                    if (!$existingCode) {
-                        // Tạo QR checkout code
-                        $checkoutCode = $this->createCheckoutCode($reservation, $payment);
-
-                        Log::info('Checkout QR code created in return URL', [
-                            'reservation_id' => $reservation->id,
-                            'reservation_code' => $reservation->reservation_code,
-                            'checkout_code' => $checkoutCode->checkout_code,
-                            'payment_id' => $payment->id,
-                        ]);
-                    }
-                } catch (\Exception $e) {
-                    Log::error('Failed to create checkout QR code in return URL', [
-                        'reservation_id' => $reservation->id ?? null,
-                        'payment_id' => $payment->id,
-                        'error' => $e->getMessage(),
-                    ]);
+                if ($reservation && $reservation->status === 'pending_payment') {
+                    $reservation->update(['status' => 'pending_checkout']);
                 }
             }
+
+            // Mobile app sẽ nhận deep link với status=PAID để biết thanh toán thành công
         }
 
         // ✅ Chuẩn bị data cho view
@@ -478,35 +452,15 @@ class PaymentController extends Controller
                 }
             }
 
-            // Tạo QR checkout code khi thanh toán reservation thành công
-            $reservation = null;
+            // ✅ Chuyển reservation từ pending_payment → pending_checkout nếu có reservation
             if ($payment->reservation_id) {
-                $reservation = \App\Models\Reservation::find($payment->reservation_id);
-            } else {
-                // Fallback: tìm theo order_id (reservation_code)
-                $reservation = \App\Models\Reservation::where('reservation_code', $payment->order_id)->first();
-            }
-
-            if ($reservation && $reservation->status === 'pending_checkout') {
-                try {
-                    // Tạo QR checkout code
-                    $checkoutCode = $this->createCheckoutCode($reservation, $payment);
-
-                    Log::info('Checkout QR code created after payment success', [
-                        'reservation_id' => $reservation->id,
-                        'reservation_code' => $reservation->reservation_code,
-                        'checkout_code' => $checkoutCode->checkout_code,
-                        'payment_id' => $payment->id,
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error('Failed to create checkout QR code', [
-                        'reservation_id' => $reservation->id,
-                        'payment_id' => $payment->id,
-                        'error' => $e->getMessage(),
-                        'trace' => $e->getTraceAsString(),
-                    ]);
+                $reservation = Reservation::find($payment->reservation_id);
+                if ($reservation && $reservation->status === 'pending_payment') {
+                    $reservation->update(['status' => 'pending_checkout']);
                 }
             }
+
+            // Mobile app sẽ nhận IPN callback với status=PAID để biết thanh toán thành công
         }
 
         return response()->json(['RspCode' => '00', 'Message' => 'Confirm Success']);
@@ -523,6 +477,118 @@ class PaymentController extends Controller
         }
 
         return response()->json($payment);
+    }
+
+    /**
+     * @OA\Put(
+     *   path="/payments/{id}/confirm-offline",
+     *   operationId="ConfirmOfflinePayment",
+     *   tags={"💳 Payments"},
+     *   summary="Xác nhận thanh toán trực tiếp (offline)",
+     *   description="Nhân viên xác nhận thanh toán trực tiếp đã được thực hiện. Chỉ áp dụng cho payment có payment_method = 'offline' và status = 'PENDING'.",
+     *   @OA\Parameter(
+     *     name="id",
+     *     in="path",
+     *     required=true,
+     *     description="ID của payment",
+     *     @OA\Schema(type="integer")
+     *   ),
+     *   @OA\Response(
+     *     response=200,
+     *     description="Xác nhận thanh toán thành công",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="success", type="boolean", example=true),
+     *       @OA\Property(property="message", type="string", example="Xác nhận thanh toán trực tiếp thành công"),
+     *       @OA\Property(
+     *         property="data",
+     *         type="object",
+     *         @OA\Property(property="payment", type="object",
+     *           @OA\Property(property="id", type="integer", example=123),
+     *           @OA\Property(property="order_id", type="string", example="RES-AB12CD34-20251019"),
+     *           @OA\Property(property="amount", type="integer", example=50000),
+     *           @OA\Property(property="status", type="string", enum={"PENDING","PAID","FAILED"}, example="PAID"),
+     *           @OA\Property(property="reservation_id", type="integer", example=456)
+     *         )
+     *       )
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=404,
+     *     description="Không tìm thấy payment",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="success", type="boolean", example=false),
+     *       @OA\Property(property="message", type="string", example="Payment not found")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=422,
+     *     description="Không thể xác nhận thanh toán",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="success", type="boolean", example=false),
+     *       @OA\Property(property="message", type="string", example="Chỉ có thể xác nhận thanh toán trực tiếp với status PENDING")
+     *     )
+     *   )
+     * )
+     */
+    public function confirmOfflinePayment($id)
+    {
+        $payment = Payment::find($id);
+
+        if (!$payment) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Payment not found'
+            ], 404);
+        }
+
+        // Kiểm tra payment method phải là offline
+        $paymentMethod = $payment->meta['payment_method'] ?? null;
+        if ($paymentMethod !== 'offline') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chỉ có thể xác nhận thanh toán trực tiếp (offline). Payment này không phải offline payment.'
+            ], 422);
+        }
+
+        // Kiểm tra status phải là PENDING
+        if ($payment->status !== 'PENDING') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chỉ có thể xác nhận thanh toán với status PENDING. Payment hiện tại có status: ' . $payment->status
+            ], 422);
+        }
+
+        // Cập nhật payment status thành PAID
+        $payment->update([
+            'status' => 'PAID',
+        ]);
+
+        // Reload payment để lấy meta đã được update
+        $payment->refresh();
+
+        // Xử lý các loại payment sau khi thanh toán thành công
+        if ($payment->meta && isset($payment->meta['type'])) {
+            if ($payment->meta['type'] === 'monthly_pass') {
+                $this->activateMonthlyPass($payment);
+            } elseif ($payment->meta['type'] === 'violation_fine') {
+                $this->resolveViolation($payment);
+            }
+        }
+
+        Log::info('Offline payment confirmed', [
+            'payment_id' => $payment->id,
+            'order_id' => $payment->order_id,
+            'amount' => $payment->amount,
+            'reservation_id' => $payment->reservation_id,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Xác nhận thanh toán trực tiếp thành công',
+            'data' => [
+                'payment' => $payment,
+            ]
+        ]);
     }
 
     /**
