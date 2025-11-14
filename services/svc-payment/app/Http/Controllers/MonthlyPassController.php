@@ -66,7 +66,7 @@ class MonthlyPassController extends Controller
             'bank_code' => 'nullable|string',
         ]);
 
-        $months = (int)($data['months'] ?? 1);
+        $months = (int) ($data['months'] ?? 1);
 
         // Validate user + vehicle từ svc-auth
         $user = $this->authService->getUserSnapshot($data['user_id']);
@@ -89,21 +89,34 @@ class MonthlyPassController extends Controller
                 // Kiểm tra vé tháng còn hiệu lực (trong khoảng start_date -> end_date)
                 $query->where(function ($q) use ($checkDate) {
                     $q->whereNull('start_date')
-                      ->orWhere('start_date', '<=', $checkDate);
+                        ->orWhere('start_date', '<=', $checkDate);
                 })
-                ->where(function ($q) use ($checkDate) {
+                    ->where(function ($q) use ($checkDate) {
                     $q->whereNull('end_date')
-                      ->orWhere('end_date', '>=', $checkDate);
+                        ->orWhere('end_date', '>=', $checkDate);
                 });
             })
             ->first();
 
         if ($existingActivePass) {
-            $endDate = $existingActivePass->end_date 
+            $endDate = $existingActivePass->end_date
                 ? $existingActivePass->end_date->format('d/m/Y')
                 : 'chưa xác định';
             return response()->json([
                 'message' => "Bạn đã có vé tháng đang hoạt động cho phương tiện này ở bãi đỗ này. Vé tháng hiện tại có hiệu lực đến ngày {$endDate}. Vui lòng đợi vé tháng hết hạn hoặc hủy vé tháng cũ trước khi đăng ký mới."
+            ], 422);
+        }
+
+        // ✅ Kiểm tra vé tháng PENDING (đang chờ thanh toán)
+        $existingPendingPass = MonthlyPass::where('user_id', $data['user_id'])
+            ->where('vehicle_id', $data['vehicle_id'])
+            ->where('parking_lot_id', $data['parking_lot_id'])
+            ->where('status', 'PENDING')
+            ->first();
+
+        if ($existingPendingPass) {
+            return response()->json([
+                'message' => "Bạn đã có vé tháng đang chờ thanh toán cho phương tiện này ở bãi đỗ này. Vui lòng hoàn tất thanh toán hoặc hủy vé tháng đang chờ trước khi đăng ký mới."
             ], 422);
         }
 
@@ -116,7 +129,7 @@ class MonthlyPassController extends Controller
             return response()->json(['message' => 'Bãi/loại xe chưa có giá vé tháng'], 422);
         }
 
-        $amount = (int)round($rule->monthly_pass * $months);
+        $amount = (int) round($rule->monthly_pass * $months);
 
         $orderId = 'MP-' . now()->format('YmdHis') . '-' . rand(10000, 99999);
         $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
@@ -448,7 +461,7 @@ class MonthlyPassController extends Controller
 
         // Nếu chưa có payment PENDING, tạo payment mới
         $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
-        
+
         // Cập nhật txn_ref của monthly pass nếu chưa có
         if (!$pass->txn_ref) {
             $pass->update(['txn_ref' => $txnRef]);

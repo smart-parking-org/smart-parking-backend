@@ -909,10 +909,68 @@ class ReservationController extends Controller
         // Slot chuyển sang occupied
         $reservation->slot->update(['status' => 'occupied']);
 
+        // ✅ Reload reservation để lấy dữ liệu mới nhất
+        $reservation->refresh();
+
+        // ✅ Kiểm tra monthly pass sau khi check-in
+        $monthlyPass = MonthlyPass::findValidPass(
+            $reservation->user_id,
+            $reservation->vehicle_id,
+            $reservation->slot->parking_lot_id,
+            $reservation->check_in_at ? $reservation->check_in_at->toDateString() : null
+        );
+
+        $hasMonthlyPass = $monthlyPass && $monthlyPass->isValid($reservation->check_in_at);
+
+        $responseData = [
+            'reservation' => $reservation,
+        ];
+
+        // ✅ Nếu có monthly pass, tạo checkout code ngay
+        if ($hasMonthlyPass) {
+            // Tạo Payment với amount = 0 (miễn phí)
+            $payment = Payment::create([
+                'order_id' => $reservation->reservation_code,
+                'reservation_id' => $reservation->id,
+                'amount' => 0,
+                'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
+                'status' => 'PAID', // Tự động PAID vì có monthly pass
+                'paid_at' => now(),
+                'meta' => [
+                    'payment_method' => 'monthly_pass',
+                    'monthly_pass_id' => $monthlyPass->id,
+                    'is_free' => true,
+                ],
+            ]);
+
+            // Cập nhật reservation với payment_id
+            $reservation->update(['payment_id' => $payment->id]);
+
+            // Tạo checkout code
+            $checkoutCode = $this->createCheckoutCode($reservation, $payment);
+
+            // Thêm thông tin checkout code vào response
+            $responseData['checkout_code'] = [
+                'checkout_code' => $checkoutCode->checkout_code,
+                'status' => $checkoutCode->status,
+                'expires_at' => $checkoutCode->expires_at?->toIso8601String(),
+                'qr_data' => $checkoutCode->checkout_code,
+            ];
+            $responseData['monthly_pass'] = [
+                'id' => $monthlyPass->id,
+                'order_id' => $monthlyPass->order_id,
+                'end_date' => $monthlyPass->end_date?->toDateString(),
+            ];
+            $responseData['is_free'] = true;
+            $responseData['skip_payment'] = true; // Flag để frontend biết bỏ qua bước thanh toán
+        }
+
         return response()->json([
             'success' => true,
-            'message' => 'Check-in thành công',
-            'data' => $reservation
+            'message' => $hasMonthlyPass 
+                ? 'Check-in thành công. Vé tháng của bạn đã được áp dụng. Vui lòng quét mã checkout khi ra khỏi bãi đỗ.'
+                : 'Check-in thành công',
+            'data' => $responseData
         ]);
     }
 
@@ -989,23 +1047,31 @@ class ReservationController extends Controller
 
         $hasMonthlyPass = $monthlyPass && $monthlyPass->isValid($reservation->check_in_at);
 
-        // Tính toán giá tiền dựa trên pricing snapshot
-        $amount = $this->calculatePaymentAmount($reservation);
+        // ✅ Kiểm tra xem đã có payment chưa (từ check-in với monthly pass)
+        $payment = $reservation->payment;
+        
+        if (!$payment) {
+            // Chưa có payment, tạo mới
+            // Tính toán giá tiền dựa trên pricing snapshot
+            $amount = $this->calculatePaymentAmount($reservation);
 
-        // Tạo Payment (nếu có monthly pass thì amount = 0, nhưng vẫn tạo payment record)
-        $payment = Payment::create([
-            'order_id' => $reservation->reservation_code,
-            'reservation_id' => $reservation->id,
-            'amount' => $amount,
-            'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
-            'status' => $hasMonthlyPass ? 'PAID' : 'PENDING', // Nếu có monthly pass thì tự động PAID
-            'meta' => [
-                'payment_method' => $paymentMethod,
-                'monthly_pass_id' => $hasMonthlyPass ? $monthlyPass->id : null,
-                'is_free' => $hasMonthlyPass,
-            ],
-        ]);
-
+            // Tạo Payment (nếu có monthly pass thì amount = 0, nhưng vẫn tạo payment record)
+            $payment = Payment::create([
+                'order_id' => $reservation->reservation_code,
+                'reservation_id' => $reservation->id,
+                'amount' => $amount,
+                'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
+                'status' => $hasMonthlyPass ? 'PAID' : 'PENDING', // Nếu có monthly pass thì tự động PAID
+                'meta' => [
+                    'payment_method' => $paymentMethod,
+                    'monthly_pass_id' => $hasMonthlyPass ? $monthlyPass->id : null,
+                    'is_free' => $hasMonthlyPass,
+                ],
+            ]);
+        } else {
+            // Đã có payment, lấy amount từ payment hiện có
+            $amount = $payment->amount;
+        }
 
         // Xác định status dựa trên payment method và monthly pass
         if ($hasMonthlyPass) {
@@ -1029,6 +1095,35 @@ class ReservationController extends Controller
             'payment_id' => $payment->id,
         ]);
 
+        // ✅ Lấy checkout code nếu có
+        $checkoutCode = CheckoutCode::where('reservation_id', $reservation->id)
+            ->where('status', 'active')
+            ->latest()
+            ->first();
+
+        $responseData = [
+            'reservation' => $reservation,
+            'payment' => $payment,
+            'amount' => $amount,
+            'payment_method' => $paymentMethod,
+            'monthly_pass' => $hasMonthlyPass ? [
+                'id' => $monthlyPass->id,
+                'order_id' => $monthlyPass->order_id,
+                'end_date' => $monthlyPass->end_date?->toDateString(),
+            ] : null,
+            'is_free' => $hasMonthlyPass,
+        ];
+
+        // ✅ Nếu có checkout code, thêm vào response
+        if ($checkoutCode) {
+            $responseData['checkout_code'] = [
+                'checkout_code' => $checkoutCode->checkout_code,
+                'status' => $checkoutCode->status,
+                'expires_at' => $checkoutCode->expires_at?->toIso8601String(),
+                'qr_data' => $checkoutCode->checkout_code,
+            ];
+        }
+
         $message = $hasMonthlyPass
             ? 'Check-out thành công. Vé tháng của bạn đã được áp dụng (miễn phí).'
             : ($paymentMethod === 'offline'
@@ -1038,18 +1133,7 @@ class ReservationController extends Controller
         return response()->json([
             'success' => true,
             'message' => $message,
-            'data' => [
-                'reservation' => $reservation,
-                'payment' => $payment,
-                'amount' => $amount,
-                'payment_method' => $paymentMethod,
-                'monthly_pass' => $hasMonthlyPass ? [
-                    'id' => $monthlyPass->id,
-                    'order_id' => $monthlyPass->order_id,
-                    'end_date' => $monthlyPass->end_date?->toDateString(),
-                ] : null,
-                'is_free' => $hasMonthlyPass,
-            ]
+            'data' => $responseData
         ]);
     }
 
@@ -1201,10 +1285,65 @@ class ReservationController extends Controller
         // ✅ Reload reservation để lấy dữ liệu mới nhất
         $reservation->refresh();
 
+        // ✅ Kiểm tra monthly pass sau khi check-in
+        $monthlyPass = MonthlyPass::findValidPass(
+            $reservation->user_id,
+            $reservation->vehicle_id,
+            $reservation->slot->parking_lot_id,
+            $reservation->check_in_at ? $reservation->check_in_at->toDateString() : null
+        );
+
+        $hasMonthlyPass = $monthlyPass && $monthlyPass->isValid($reservation->check_in_at);
+
+        $responseData = [
+            'reservation' => $reservation,
+        ];
+
+        // ✅ Nếu có monthly pass, tạo checkout code ngay
+        if ($hasMonthlyPass) {
+            // Tạo Payment với amount = 0 (miễn phí)
+            $payment = Payment::create([
+                'order_id' => $reservation->reservation_code,
+                'reservation_id' => $reservation->id,
+                'amount' => 0,
+                'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
+                'status' => 'PAID', // Tự động PAID vì có monthly pass
+                'paid_at' => now(),
+                'meta' => [
+                    'payment_method' => 'monthly_pass',
+                    'monthly_pass_id' => $monthlyPass->id,
+                    'is_free' => true,
+                ],
+            ]);
+
+            // Cập nhật reservation với payment_id
+            $reservation->update(['payment_id' => $payment->id]);
+
+            // Tạo checkout code
+            $checkoutCode = $this->createCheckoutCode($reservation, $payment);
+
+            // Thêm thông tin checkout code vào response
+            $responseData['checkout_code'] = [
+                'checkout_code' => $checkoutCode->checkout_code,
+                'status' => $checkoutCode->status,
+                'expires_at' => $checkoutCode->expires_at?->toIso8601String(),
+                'qr_data' => $checkoutCode->checkout_code,
+            ];
+            $responseData['monthly_pass'] = [
+                'id' => $monthlyPass->id,
+                'order_id' => $monthlyPass->order_id,
+                'end_date' => $monthlyPass->end_date?->toDateString(),
+            ];
+            $responseData['is_free'] = true;
+            $responseData['skip_payment'] = true; // Flag để frontend biết bỏ qua bước thanh toán
+        }
+
         return response()->json([
             'success' => true,
-            'message' => 'Check-in thành công',
-            'data' => $reservation
+            'message' => $hasMonthlyPass 
+                ? 'Check-in thành công. Vé tháng của bạn đã được áp dụng. Vui lòng quét mã checkout khi ra khỏi bãi đỗ.'
+                : 'Check-in thành công',
+            'data' => $responseData
         ]);
     }
 
@@ -1664,6 +1803,31 @@ class ReservationController extends Controller
                     'processed_at' => now(),
                 ]);
         }
+    }
+
+    /**
+     * Tạo QR checkout code sau khi thanh toán thành công hoặc có monthly pass
+     */
+    private function createCheckoutCode(Reservation $reservation, Payment $payment): CheckoutCode
+    {
+        // Tạo mã checkout code duy nhất
+        $checkoutCode = 'CHK-' . strtoupper(Str::random(8)) . '-' . now()->format('Ymd');
+
+        // Kiểm tra mã đã tồn tại chưa (rất hiếm nhưng để an toàn)
+        while (CheckoutCode::where('checkout_code', $checkoutCode)->exists()) {
+            $checkoutCode = 'CHK-' . strtoupper(Str::random(8)) . '-' . now()->format('Ymd');
+        }
+
+        // Tạo checkout code với thời gian hết hạn 24 giờ
+        $checkoutCodeModel = CheckoutCode::create([
+            'reservation_id' => $reservation->id,
+            'payment_id' => $payment->id,
+            'checkout_code' => $checkoutCode,
+            'status' => 'active',
+            'expires_at' => now()->addHours(24),
+        ]);
+
+        return $checkoutCodeModel;
     }
 
     /**
