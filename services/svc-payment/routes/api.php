@@ -21,6 +21,7 @@ Route::post('/payments/create', [PaymentController::class, 'create']);
 Route::match(['get', 'post'], '/payments/return', [PaymentController::class, 'return']);
 Route::match(['get', 'post'], '/payments/ipn', [PaymentController::class, 'ipn']);
 Route::get('/payments/by-order/{orderId}', [PaymentController::class, 'getByOrder']);
+Route::put('/payments/{id}/confirm-offline', [PaymentController::class, 'confirmOfflinePayment']);
 
 Route::get('/payments/status/{reservation_id}', [PaymentController::class, 'status']);
 Route::get('/payments/calculate/{reservation_id}', [PaymentController::class, 'calculate']);
@@ -45,18 +46,18 @@ Route::prefix('reservations')->group(function () {
     Route::get('/', [ReservationController::class, 'index']);           // Danh sách tất cả reservation
     Route::post('/', [ReservationController::class, 'store']);           // Đặt chỗ
     Route::get('/user/{user_id}/history', [ReservationController::class, 'getUserHistory']);
+
+    // Checkout QR code APIs
+    Route::post('/demo/check-in', [ReservationController::class, 'demoCheckIn']);
+    Route::post('/demo/check-out', [ReservationController::class, 'demoCheckOut']);
+    Route::post('/expire-due', [ReservationController::class, 'expireDue']);
+    Route::post('/scan-checkout', [ReservationController::class, 'scanCheckoutCode']); // Quét QR checkout code
+
     Route::get('/{id}', [ReservationController::class, 'show']);        // Chi tiết
     Route::put('/{id}/extend', [ReservationController::class, 'extend']); // Gia hạn
     Route::put('/{id}/cancel', [ReservationController::class, 'cancel']); // Hủy
     Route::put('/{id}/check-in', [ReservationController::class, 'checkIn']); // check-in
     Route::put('/{id}/check-out', [ReservationController::class, 'checkOut']); // check-out
-
-    Route::post('/demo/check-in', [ReservationController::class, 'demoCheckIn']);
-    Route::post('/demo/check-out', [ReservationController::class, 'demoCheckOut']);
-    Route::post('/expire-due', [ReservationController::class, 'expireDue']);
-    
-    // Checkout QR code APIs
-    Route::post('/scan-checkout', [ReservationController::class, 'scanCheckoutCode']); // Quét QR checkout code
     Route::get('/{id}/checkout-code', [ReservationController::class, 'getCheckoutCode']); // Lấy QR checkout code
 });
 

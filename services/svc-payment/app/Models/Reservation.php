@@ -75,7 +75,7 @@ class Reservation extends Model
     // Trạng thái kiểm tra nhanh
     public function isActive(): bool
     {
-        return in_array($this->status, ['confirmed', 'checked_in', 'pending_checkout']);
+        return in_array($this->status, ['confirmed', 'checked_in', 'pending_payment', 'pending_checkout']);
     }
 
     // Relationship với CheckoutCode
