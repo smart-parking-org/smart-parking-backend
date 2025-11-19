@@ -173,9 +173,13 @@ class HungarianSlotAllocationService
                 $firstRequest = $requests->first();
                 $vehicleTypesInBatch = $requests->pluck('vehicle_type')->unique();
 
+                // Lấy slots với khoảng cách đến cổng gần nhất
                 $allSlots = ParkingSlot::where('parking_lot_id', $firstRequest->parking_lot_id)
                     ->whereIn('vehicle_type', $vehicleTypesInBatch)
-                    ->orderBy('distance_from_gate', 'asc')
+                    ->leftJoin('slot_gate_distances', 'parking_slots.id', '=', 'slot_gate_distances.slot_id')
+                    ->select('parking_slots.*', DB::raw('COALESCE(MIN(slot_gate_distances.distance), parking_slots.distance_from_gate) as min_gate_distance'))
+                    ->groupBy('parking_slots.id')
+                    ->orderBy('min_gate_distance', 'asc')
                     ->lockForUpdate() // LOCK để tránh race condition
                     ->get();
 
@@ -234,11 +238,16 @@ class HungarianSlotAllocationService
                         'processed_at' => now()
                     ]);
 
+                    // Lấy khoảng cách từ slot_gate_distances hoặc distance_from_gate
+                    $minDistance = DB::table('slot_gate_distances')
+                        ->where('slot_id', $slot->id)
+                        ->min('distance') ?? $slot->distance_from_gate;
+
                     $allocations[] = [
                         'request_id' => $request->id,
                         'slot_id' => $slot->id,
                         'cost' => $cost,
-                        'distance' => $slot->distance_from_gate
+                        'distance' => $minDistance ?? $slot->distance_from_gate
                     ];
 
                     $success++;
@@ -287,9 +296,14 @@ class HungarianSlotAllocationService
                 }
 
                 // 3. Chi phí khoảng cách (0-1000, normalize)
+                // Sử dụng khoảng cách từ slot_gate_distances hoặc distance_from_gate
+                $minDistance = DB::table('slot_gate_distances')
+                    ->where('slot_id', $slot->id)
+                    ->min('distance') ?? $slot->distance_from_gate;
+                
                 // Giả sử khoảng cách tối đa là 500m
                 $distanceCost = min(
-                    ($slot->distance_from_gate / 500) * self::MAX_DISTANCE_PENALTY,
+                    (($minDistance ?? $slot->distance_from_gate) / 500) * self::MAX_DISTANCE_PENALTY,
                     self::MAX_DISTANCE_PENALTY
                 );
                 $cost += $distanceCost;

@@ -36,6 +36,18 @@ class ParkingSlot extends Model
         return $this->hasMany(ReservationRequest::class, 'allocated_slot_id');
     }
 
+    public function gateDistances()
+    {
+        return $this->hasMany(SlotGateDistance::class, 'slot_id');
+    }
+
+    public function gates()
+    {
+        return $this->belongsToMany(Gate::class, 'slot_gate_distances')
+            ->withPivot('distance')
+            ->withTimestamps();
+    }
+
     public function currentReservation()
     {
         return $this->hasOne(Reservation::class, 'slot_id')
