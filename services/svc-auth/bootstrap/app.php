@@ -16,6 +16,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'ensure.admin' => EnsureAdmin::class,
         ]);
+        $middleware->alias([
+            'ensure.staff' => \App\Http\Middleware\EnsureStaff::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

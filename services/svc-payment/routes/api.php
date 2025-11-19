@@ -9,6 +9,7 @@ use App\Http\Controllers\PeakHourController;
 use App\Http\Controllers\PricingRuleController;
 use App\Http\Controllers\ReservationController;
 use App\Http\Controllers\SampleController;
+use App\Http\Controllers\StaffController;
 use App\Http\Controllers\ViolationController;
 use Illuminate\Support\Facades\Route;
 
@@ -86,7 +87,6 @@ Route::prefix('extension-policies')->group(function () {
     Route::get('/parking-lot/{parkingLotId}', [ExtensionPolicyController::class, 'getByParkingLot']);
 });
 
-Route::post('/send-notification', [NotificationController::class, 'sendPushNotification']);
 // Monthly Passes
 Route::prefix('monthly-passes')->group(function () {
     Route::post('/', [MonthlyPassController::class, 'store']);           // Tạo vé tháng + URL thanh toán
@@ -149,6 +149,10 @@ Route::prefix('notifications')->group(function () {
     Route::get('/unread-count', [NotificationController::class, 'getUnreadCount']);
     Route::delete('/{id}', [NotificationController::class, 'destroy']); // Xóa một notification
     Route::delete('/delete-all', [NotificationController::class, 'deleteAll']); // Xóa tất cả notifications của user
+});
+
+Route::prefix('staff')->group(function () {
+    Route::get('/navigation', [StaffController::class, 'navigation']);
 });
 
 // Monthly Passes

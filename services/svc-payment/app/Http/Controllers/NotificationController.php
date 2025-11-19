@@ -33,8 +33,9 @@ class NotificationController extends Controller
      *   @OA\RequestBody(
      *     required=true,
      *     @OA\JsonContent(
-     *       required={"user_id", "title", "body", "type"},
-     *       @OA\Property(property="user_id", type="integer", example=2),
+     *       required={"title", "body", "type"},
+     *       @OA\Property(property="user_id", type="integer", example=2, nullable=true),
+     *       @OA\Property(property="license_plate", type="string", example="51H-123.45", nullable=true),
      *       @OA\Property(property="title", type="string", example="Thông báo quan trọng"),
      *       @OA\Property(property="body", type="string", example="Bạn có một thông báo mới"),
      *       @OA\Property(property="type", type="string", example="other"),
@@ -48,20 +49,44 @@ class NotificationController extends Controller
     public function sendPushNotification(Request $request)
     {
         $validated = $request->validate([
-            'user_id' => 'required|integer',
+            'user_id' => 'nullable|integer|required_without:license_plate',
+            'license_plate' => 'nullable|string|required_without:user_id',
             'title' => 'required|string',
             'body' => 'required|string',
             'type' => 'required|string',
+            'data' => 'nullable|array',
         ]);
-        $token = $this->authService->getTokenByUserId($validated['user_id']);
+
+        $recipient = $this->resolveRecipient(
+            $validated['user_id'] ?? null,
+            $validated['license_plate'] ?? null
+        );
+
+        if (!$recipient) {
+            $message = empty($validated['license_plate'])
+                ? 'User not found'
+                : 'Không tìm thấy cư dân cho biển số ' . $validated['license_plate'];
+
+            return response()->json(['message' => $message], 404);
+        }
+
+        $token = $this->authService->getTokenByUserId($recipient['user_id']);
         if (!$token) {
             return response()->json(['message' => 'No FCM token'], 404);
+        }
+
+        $payloadData = $validated['data'] ?? [];
+        if (!empty($recipient['license_plate'])) {
+            $payloadData = array_merge([
+                'license_plate' => $recipient['license_plate'],
+            ], $payloadData);
         }
 
         $response = $this->sendNotification(
             $token,
             $validated['title'],
             $validated['body'],
+            $payloadData,
         );
 
         // Kiểm tra response từ FCM
@@ -82,10 +107,12 @@ class NotificationController extends Controller
         }
         // Lưu vào database nếu gửi thành công
         $notification = Notification::create([
-            'user_id' => $validated['user_id'],
+            'user_id' => $recipient['user_id'],
+            'reservation_id' => $recipient['reservation_id'] ?? null,
             'type' => $validated['type'],
             'title' => $validated['title'],
             'body' => $validated['body'],
+            'data' => $payloadData ?: null, // Lưu data nếu có
             'is_read' => false,
         ]);
 
@@ -318,5 +345,55 @@ class NotificationController extends Controller
             'message' => 'All notifications deleted successfully',
             'deleted_count' => $deleted,
         ], 200);
+    }
+
+    private function resolveRecipient(?int $userId, ?string $licensePlate): ?array
+    {
+        if ($userId) {
+            return [
+                'user_id' => $userId,
+                'license_plate' => $licensePlate,
+                'reservation_id' => null,
+            ];
+        }
+
+        if (!$licensePlate) {
+            return null;
+        }
+
+        $reservation = $this->findReservationByPlate($licensePlate);
+
+        if (!$reservation) {
+            return null;
+        }
+
+        $snapshotPlate = data_get($reservation->vehicle_snapshot, 'license_plate')
+            ?? data_get($reservation->vehicle_snapshot, 'plate');
+
+        return [
+            'user_id' => $reservation->user_id,
+            'license_plate' => $snapshotPlate ?? $licensePlate,
+            'reservation_id' => $reservation->id,
+        ];
+    }
+
+    private function findReservationByPlate(string $licensePlate): ?Reservation
+    {
+        $normalizedPlate = $this->normalizePlate($licensePlate);
+
+        return Reservation::query()
+            ->where(function ($query) use ($licensePlate, $normalizedPlate) {
+                $query->where('vehicle_snapshot->license_plate', $licensePlate)
+                    ->orWhere('vehicle_snapshot->plate', $licensePlate)
+                    ->orWhereRaw("REPLACE(UPPER(JSON_UNQUOTE(JSON_EXTRACT(vehicle_snapshot, '$.license_plate'))), '-', '') = ?", [$normalizedPlate])
+                    ->orWhereRaw("REPLACE(UPPER(JSON_UNQUOTE(JSON_EXTRACT(vehicle_snapshot, '$.plate'))), '-', '') = ?", [$normalizedPlate]);
+            })
+            ->orderByDesc('created_at')
+            ->first();
+    }
+
+    private function normalizePlate(string $licensePlate): string
+    {
+        return strtoupper(preg_replace('/[^A-Z0-9]/', '', $licensePlate));
     }
 }

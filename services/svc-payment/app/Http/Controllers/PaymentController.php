@@ -80,6 +80,19 @@ class PaymentController extends Controller
             ->where('status', 'PENDING')
             ->first();
 
+        // ✅ Kiểm tra nếu đã có payment PAID
+        $paidPayment = Payment::where('reservation_id', $r->reservation_id)
+            ->where('status', 'PAID')
+            ->first();
+
+        if ($paidPayment) {
+            return response()->json([
+                'message' => 'Reservation này đã thanh toán thành công. Không thể tạo payment mới.',
+                'payment_id' => $paidPayment->id,
+                'status' => $paidPayment->status,
+            ], 422);
+        }
+
         if ($existingPayment) {
             // Tính lại phí (có thể thay đổi nếu thời gian đã tăng)
             $parkingLotId = $reservation->slot->parking_lot_id;
@@ -129,6 +142,12 @@ class PaymentController extends Controller
             ]);
         }
 
+        // ✅ Kiểm tra nếu có payment FAILED, tạo txn_ref mới
+        $failedPayment = Payment::where('reservation_id', $r->reservation_id)
+            ->where('status', 'FAILED')
+            ->latest()
+            ->first();
+
         // Nếu chưa có payment PENDING, tính phí và tạo mới
         $parkingLotId = $reservation->slot->parking_lot_id;
         $vehicleType = $reservation->vehicle_snapshot['vehicle_type'] ?? 'motorbike';
@@ -144,16 +163,23 @@ class PaymentController extends Controller
         $amount = 15000;
 
         $orderId = $reservation->reservation_code;
+
+        // ✅ Tạo txn_ref mới, đảm bảo unique
         $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
+        // Kiểm tra txn_ref đã tồn tại chưa (rất hiếm nhưng để an toàn)
+        while (Payment::where('txn_ref', $txnRef)->exists()) {
+            $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
+        }
 
         $p = Payment::create([
             'order_id' => $r->order_id,
-            'reservation_id' => $r->reservation_id, // ✅ Thêm dòng này
-            'amount' => $r->amount,
+            'reservation_id' => $r->reservation_id,
+            'amount' => $amount,
             'txn_ref' => $txnRef,
             'status' => 'PENDING',
             'meta' => [
                 'type' => 'parking_fee',
+                'payment_method' => 'online',
                 'reservation_id' => $reservation->id,
                 'check_in_at' => $reservation->check_in_at->toIso8601String(),
                 'check_out_at' => $checkOutAt->toIso8601String(),
