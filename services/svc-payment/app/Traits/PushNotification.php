@@ -13,6 +13,7 @@ trait PushNotification
         $token,
         $title,
         $body,
+        array $data = [],
     ) {
         $fcmurl = config('services.firebase.fcm_url');
 
@@ -24,6 +25,22 @@ trait PushNotification
             ],
             'token' => $token
         ];
+
+        if (!empty($data)) {
+            $notification['data'] = collect($data)
+                ->map(function ($value) {
+                    if (is_bool($value)) {
+                        return $value ? 'true' : 'false';
+                    }
+
+                    if (is_scalar($value)) {
+                        return (string)$value;
+                    }
+
+                    return json_encode($value);
+                })
+                ->toArray();
+        }
 
         try {
             $accessToken = $this->getAccessToken();

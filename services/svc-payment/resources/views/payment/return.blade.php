@@ -39,7 +39,9 @@
 
         h1 {
             font-size: 28px;
-            color: {{ $color }};
+            color:
+                {{ $color }}
+            ;
             margin-bottom: 15px;
         }
 
@@ -115,7 +117,8 @@
         </div>
 
         <div class="fallback" id="fallback">
-            <p>Nếu app không tự động mở, vui lòng nhấn nút "Quay lại App" ở trên hoặc đóng trình duyệt và mở app thủ công.</p>
+            <p>Nếu app không tự động mở, vui lòng nhấn nút "Quay lại App" ở trên hoặc đóng trình duyệt và mở app thủ
+                công.</p>
         </div>
     </div>
 
@@ -124,16 +127,16 @@
         const txnRef = '{{ $payment->txn_ref }}';
         const orderId = '{{ $payment->order_id }}';
         const reservationId = '{{ $payment->reservation_id ?? '' }}';
-        
+
         // ✅ Tạo deep link thông thường
         const deepLink = `smartparking://payment/result?status=${status}&txn_ref=${txnRef}&order_id=${orderId}&reservation_id=${reservationId}`;
-        
+
         // ✅ Tạo Intent URL cho Android
         const intentUrl = `intent://payment/result?status=${status}&txn_ref=${txnRef}&order_id=${orderId}&reservation_id=${reservationId}#Intent;scheme=smartparking;package=com.hoangkhadev.smartparkingmobile;end`;
-        
+
         // ✅ Detect Android
         const isAndroid = /android/i.test(navigator.userAgent || navigator.vendor || window.opera);
-        
+
         let countdown = 5;
         const countdownEl = document.getElementById('countdown');
         const btn = document.getElementById('redirectBtn');
@@ -146,7 +149,7 @@
             redirectAttempted = true;
             appOpened = true;
             clearInterval(timer);
-            
+
             // ✅ Android: dùng Intent URL
             if (isAndroid) {
                 window.location.href = intentUrl;
@@ -154,9 +157,9 @@
                 // ✅ iOS: dùng deep link thông thường
                 window.location.replace(deepLink);
             }
-            
+
             // ✅ Hiển thị fallback sau 2 giây nếu vẫn còn ở trang
-            setTimeout(function() {
+            setTimeout(function () {
                 if (document.hasFocus()) {
                     fallback.style.display = 'block';
                 }
@@ -178,7 +181,7 @@
         }, 1000);
 
         // ✅ Thử mở app ngay lập tức
-        setTimeout(function() {
+        setTimeout(function () {
             if (!appOpened) {
                 openApp();
             }
@@ -186,7 +189,7 @@
 
         // ✅ Detect khi user quay lại browser (app đã mở thành công)
         let hidden = false;
-        document.addEventListener('visibilitychange', function() {
+        document.addEventListener('visibilitychange', function () {
             if (document.hidden) {
                 hidden = true;
             } else if (hidden) {
@@ -200,7 +203,7 @@
 
         // ✅ Fallback: thử lại với deep link thông thường nếu là Android và intent không hoạt động
         if (isAndroid) {
-            setTimeout(function() {
+            setTimeout(function () {
                 if (!appOpened && document.hasFocus()) {
                     // Thử lại với deep link thông thường
                     window.location.href = deepLink;

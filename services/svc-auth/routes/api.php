@@ -4,6 +4,7 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\VehicleController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\StaffController;
 
 Route::prefix('auth')->group(function () {
     Route::post('register', [AuthController::class, 'register']);
@@ -53,4 +54,9 @@ Route::prefix("users")->group(function () {
         Route::post('/restore/{id}', [UserController::class, 'restore']);
         Route::delete('/{id}', [UserController::class, 'destroy']);
     });
+});
+
+// Staff
+Route::prefix('staff')->middleware(['auth:api', 'ensure.staff'])->group(function () {
+    Route::get('/search-user', [StaffController::class, 'searchUserByLicensePlate']);
 });

@@ -9,6 +9,7 @@ use App\Http\Controllers\PeakHourController;
 use App\Http\Controllers\PricingRuleController;
 use App\Http\Controllers\ReservationController;
 use App\Http\Controllers\SampleController;
+use App\Http\Controllers\StaffController;
 use App\Http\Controllers\ViolationController;
 use Illuminate\Support\Facades\Route;
 
@@ -149,6 +150,10 @@ Route::prefix('notifications')->group(function () {
     Route::get('/unread-count', [NotificationController::class, 'getUnreadCount']);
     Route::delete('/{id}', [NotificationController::class, 'destroy']); // Xóa một notification
     Route::delete('/delete-all', [NotificationController::class, 'deleteAll']); // Xóa tất cả notifications của user
+});
+
+Route::prefix('staff')->group(function () {
+    Route::get('/navigation', [StaffController::class, 'navigation']);
 });
 
 // Monthly Passes

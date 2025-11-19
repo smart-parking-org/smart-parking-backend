@@ -967,7 +967,7 @@ class ReservationController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => $hasMonthlyPass 
+            'message' => $hasMonthlyPass
                 ? 'Check-in thành công. Vé tháng của bạn đã được áp dụng. Vui lòng quét mã checkout khi ra khỏi bãi đỗ.'
                 : 'Check-in thành công',
             'data' => $responseData
@@ -1049,7 +1049,7 @@ class ReservationController extends Controller
 
         // ✅ Kiểm tra xem đã có payment chưa (từ check-in với monthly pass)
         $payment = $reservation->payment;
-        
+
         if (!$payment) {
             // Chưa có payment, tạo mới
             // Tính toán giá tiền dựa trên pricing snapshot
@@ -1340,7 +1340,7 @@ class ReservationController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => $hasMonthlyPass 
+            'message' => $hasMonthlyPass
                 ? 'Check-in thành công. Vé tháng của bạn đã được áp dụng. Vui lòng quét mã checkout khi ra khỏi bãi đỗ.'
                 : 'Check-in thành công',
             'data' => $responseData
