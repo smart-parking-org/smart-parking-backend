@@ -603,11 +603,11 @@ class VehicleController extends Controller
                 return response()->json(['message' => 'Vehicle not found'], 404);
             }
 
-            if ($vehicle->status !== 'rejected') {
-                return response()->json([
-                    'message' => 'Phương tiện này không ở trạng thái bị từ chối'
-                ], 400);
-            }
+            // if ($vehicle->status !== 'rejected') {
+            //     return response()->json([
+            //         'message' => 'Phương tiện này không ở trạng thái bị từ chối'
+            //     ], 400);
+            // }
 
             $vehicle->status = 'pending';
             $vehicle->save();
