@@ -11,7 +11,8 @@ class Vehicle extends Model
         'vehicle_type',
         'license_plate',
         'is_primary',
-        'is_active'
+        'is_active',
+        'status'
     ];
 
     protected $casts = [

@@ -30,6 +30,7 @@ class VehicleResource extends JsonResource
             'license_plate' => $this->license_plate,
             'is_primary' => (bool) $this->is_primary,
             'is_active' => (bool) $this->is_active,
+            'status' => $this->status,
             'created_at' => optional($this->created_at)->toISOString(),
             'updated_at' => optional($this->updated_at)->toISOString(),
         ];
