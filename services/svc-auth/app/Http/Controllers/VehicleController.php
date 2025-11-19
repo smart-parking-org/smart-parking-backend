@@ -56,6 +56,16 @@ class VehicleController extends Controller
      *         )
      *     ),
      *     @OA\Parameter(
+     *         name="status",
+     *         in="query",
+     *         description="Lọc theo status: 'pending', 'approved', 'rejected'",
+     *         required=false,
+     *         @OA\Schema(
+     *              type="string",
+     *              enum={"pending", "approved", "rejected"}
+     *         )
+     *     ),
+     *     @OA\Parameter(
      *         name="user_id",
      *         in="query",
      *         description="Lọc theo người dùng",
@@ -97,6 +107,10 @@ class VehicleController extends Controller
                 ->when(
                     $request->filled('is_active'),
                     fn($q) => $q->where('is_active', $request->boolean('is_active'))
+                )
+                ->when(
+                    $request->filled('status'),
+                    fn($q) => $q->where('status', $request->query('status'))
                 )
                 ->when(
                     $request->filled('vehicle_type'),
@@ -487,5 +501,126 @@ class VehicleController extends Controller
         }
 
         return new VehicleResource($vehicle->refresh());
+    }
+
+    /**
+     * @OA\Post(
+     *   path="/vehicles/{id}/review",
+     *   security={{"bearerAuth":{}}},
+     *   tags={"Vehicles"},
+     *   summary="Admin duyệt hoặc từ chối phương tiện",
+     *   @OA\Parameter(
+     *     name="id", in="path", required=true, description="Vehicle ID",
+     *     @OA\Schema(type="integer", example=1)
+     *   ),
+     *   @OA\RequestBody(
+     *     required=true,
+     *     @OA\JsonContent(
+     *       required={"status"},
+     *       @OA\Property(property="status", type="string", enum={"approved","rejected"}, example="approved")
+     *     )
+     *   ),
+     *   @OA\Response(response=200, description="Success", @OA\JsonContent(ref="#/components/schemas/Vehicle")),
+     *   @OA\Response(response=404, description="Not Found"),
+     *   @OA\Response(response=422, description="Validation error"),
+     *   @OA\Response(response=500, description="Lỗi máy chủ")
+     * )
+     */
+    public function review(Request $request, string $id)
+    {
+        $data = $request->validate([
+            'status' => 'required|in:approved,rejected'
+        ]);
+
+        try {
+            $vehicle = Vehicle::find($id);
+            if (!$vehicle) {
+                return response()->json(['message' => 'Vehicle not found'], 404);
+            }
+
+            $vehicle->status = $data['status'];
+
+            if ($data['status'] === 'approved') {
+                $vehicle->is_active = true;
+            }
+
+            $vehicle->save();
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi duyệt phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
+
+        return new VehicleResource($vehicle->refresh());
+    }
+
+    /**
+     * @OA\Post(
+     *   path="/vehicles/{id}/resubmit",
+     *   tags={"Vehicles"},
+     *   summary="Người dùng yêu cầu phê duyệt lại phương tiện sau khi bị từ chối",
+     *   @OA\Parameter(
+     *     name="id", in="path", required=true, description="Vehicle ID",
+     *     @OA\Schema(type="integer", example=1)
+     *   ),
+     *   @OA\Response(
+     *     response=200,
+     *     description="Success",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã gửi yêu cầu phê duyệt lại thành công"),
+     *       @OA\Property(property="data", ref="#/components/schemas/Vehicle")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=404,
+     *     description="Not Found",
+     *     @OA\JsonContent(type="object",
+     *       @OA\Property(property="message", type="string", example="Vehicle not found")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=400,
+     *     description="Bad Request",
+     *     @OA\JsonContent(type="object",
+     *       @OA\Property(property="message", type="string", example="Phương tiện này không ở trạng thái bị từ chối")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=500,
+     *     description="Lỗi máy chủ",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="message", type="string", example="Đã xảy ra lỗi, vui lòng thử lại sau.")
+     *     )
+     *   )
+     * )
+     */
+    public function resubmit(string $id)
+    {
+        try {
+            $vehicle = Vehicle::find($id);
+            if (!$vehicle) {
+                return response()->json(['message' => 'Vehicle not found'], 404);
+            }
+
+            if ($vehicle->status !== 'rejected') {
+                return response()->json([
+                    'message' => 'Phương tiện này không ở trạng thái bị từ chối'
+                ], 400);
+            }
+
+            $vehicle->status = 'pending';
+            $vehicle->save();
+        } catch (\Throwable $e) {
+            Log::error('Lỗi khi yêu cầu phê duyệt lại phương tiện: ', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Đã xảy ra lỗi, vui lòng thử lại sau.'
+            ], 500);
+        }
+
+        return response()->json([
+            'message' => 'Đã gửi yêu cầu phê duyệt lại thành công',
+            'data' => new VehicleResource($vehicle->refresh())
+        ]);
     }
 }

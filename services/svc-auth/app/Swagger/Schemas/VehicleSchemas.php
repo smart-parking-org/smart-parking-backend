@@ -19,6 +19,7 @@ namespace App\Swagger\Schemas;
  *   @OA\Property(property="license_plate", type="string", maxLength=20, example="94K-123.45"),
  *   @OA\Property(property="is_active", type="boolean", example=true),
  *   @OA\Property(property="is_primary", type="boolean", example=false),
+ *   @OA\Property(property="status", type="string", example="pending"),
  *   @OA\Property(property="created_at", type="string", format="date-time", example="2025-10-05T04:30:00Z"),
  *   @OA\Property(property="updated_at", type="string", format="date-time", example="2025-10-05T04:35:00Z")
  * )

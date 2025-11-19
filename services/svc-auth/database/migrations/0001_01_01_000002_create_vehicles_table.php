@@ -18,6 +18,7 @@ return new class extends Migration {
             $table->string('license_plate', 20)->unique();
             $table->boolean('is_primary')->default(false);
             $table->boolean('is_active')->default(true);
+            $table->enum('status', ['pending', 'approved', 'rejected'])->default('pending');
 
             $table->timestamps();
             $table->index('user_id');

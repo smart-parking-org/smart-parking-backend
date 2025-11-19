@@ -34,6 +34,8 @@ Route::prefix("vehicles")->group(function () {
     Route::delete('/{id}', [VehicleController::class, 'destroy']);
     Route::post('/primary/{id}', [VehicleController::class, 'setPrimary']);
     Route::post('/toggle-active/{id}', [VehicleController::class, 'toogleActive']);
+    Route::post('/{id}/review', [VehicleController::class, 'review'])->middleware(['auth:api', 'ensure.admin']);
+    Route::post('/{id}/resubmit', [VehicleController::class, 'resubmit']);
 });
 
 
