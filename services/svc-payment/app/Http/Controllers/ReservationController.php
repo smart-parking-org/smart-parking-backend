@@ -2,9 +2,16 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CheckoutCode;
 use App\Models\ExtensionPolicy;
+use App\Models\MonthlyPass;
+use App\Models\Payment;
+use App\Models\PeakHour;
 use App\Services\AuthService;
+use App\Services\ParkingFeeService;
 use App\Services\PriorityQueueSlotAllocationService;
+use App\Services\VnpayService;
+use App\Traits\PushNotification;
 use Carbon\Carbon;
 use App\Models\Reservation;
 use Http;
@@ -25,6 +32,7 @@ use App\Http\Requests\Reservation\ReservationStoreRequest;
  */
 class ReservationController extends Controller
 {
+    use PushNotification;
     private AuthService $authService;
 
     public function __construct(AuthService $authService)
@@ -146,7 +154,7 @@ class ReservationController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Reservation::with(['slot', 'reservationRequest']);
+        $query = Reservation::with(['slot', 'reservationRequest', 'payment']);
 
         // Filter theo user_id
         if ($request->filled('user_id')) {
@@ -192,6 +200,7 @@ class ReservationController extends Controller
             'total_reservations' => Reservation::count(),
             'confirmed' => Reservation::where('status', 'confirmed')->count(),
             'checked_in' => Reservation::where('status', 'checked_in')->count(),
+            'pending_checkout' => Reservation::where('status', 'pending_checkout')->count(),
             'checked_out' => Reservation::where('status', 'checked_out')->count(),
             'cancelled' => Reservation::where('status', 'cancelled')->count(),
             'expired' => Reservation::where('status', 'expired')->count(),
@@ -402,6 +411,7 @@ class ReservationController extends Controller
         if ($vehicleId) {
             $vehicleCheck = $this->authService->checkVehicleExists($vehicleId);
             if (!$vehicleCheck['exists']) {
+                \Log::info('Loi 1');
                 return response()->json([
                     'success' => false,
                     'message' => 'Phương tiện không tồn tại'
@@ -409,6 +419,8 @@ class ReservationController extends Controller
             }
 
             if (!$vehicleCheck['is_active']) {
+                \Log::info('Loi 2');
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Phương tiện đã bị khóa'
@@ -418,6 +430,8 @@ class ReservationController extends Controller
             // Kiểm tra vehicle có thuộc về user không
             $vehicleData = $vehicleCheck['data'];
             if ($vehicleData['user']['id'] !== $userId) {
+                \Log::info('Loi 3');
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Phương tiện không thuộc về người dùng này'
@@ -426,9 +440,11 @@ class ReservationController extends Controller
 
             // Kiểm tra vehicle có đang được sử dụng trong reservation khác không
             $hasActiveReservationByVehicle = Reservation::where('vehicle_id', $vehicleId)
-                ->whereIn('status', ['confirmed', 'checked_in'])
+                ->whereIn('status', ['confirmed', 'checked_in', 'pending_checkout'])
                 ->exists();
             if ($hasActiveReservationByVehicle) {
+                \Log::info('Loi 4');
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Xe này đang có đặt chỗ đang hiệu lực'
@@ -440,9 +456,11 @@ class ReservationController extends Controller
         $MAX_ACTIVE_PER_USER = 3;
         if ($userId) {
             $activeCount = Reservation::where('user_id', $userId)
-                ->whereIn('status', ['confirmed', 'checked_in'])
+                ->whereIn('status', ['confirmed', 'checked_in', 'pending_checkout'])
                 ->count();
             if ($activeCount >= $MAX_ACTIVE_PER_USER) {
+                \Log::info('Loi 5');
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Bạn đã đạt giới hạn số lượt đặt đang hiệu lực'
@@ -471,6 +489,8 @@ class ReservationController extends Controller
 
                 if (!$allocatedSlot) {
                     $reservationRequest->update(['status' => 'failed']);
+                    \Log::info('Loi 6');
+
                     return response()->json([
                         'success' => false,
                         'message' => 'Không có chỗ trống phù hợp với loại xe này'
@@ -482,11 +502,21 @@ class ReservationController extends Controller
                 $end = $start->copy()->addMinutes($duration);
                 if (TimeOverlapService::hasOverlapOnSlot($allocatedSlot->id, $start, $end)) {
                     $reservationRequest->update(['status' => 'failed']);
+                    \Log::info('Loi 7');
+
                     return response()->json([
                         'success' => false,
                         'message' => 'Khung giờ đã bị trùng, vui lòng thử lại'
                     ], 422);
                 }
+
+                // ✅ Kiểm tra monthly pass
+                $monthlyPass = MonthlyPass::findValidPass(
+                    $userId,
+                    $vehicleId,
+                    $parkingLotId,
+                    $start->toDateString()
+                );
 
                 // 4. Tạo Reservation (confirmed) + giữ chỗ 15 phút
                 $reservation = Reservation::create([
@@ -503,7 +533,6 @@ class ReservationController extends Controller
                     'vehicle_snapshot' => $this->getVehicleSnapshot($reservationRequest->vehicle_id),
                     'pricing_snapshot' => $this->getPricingSnapshot($reservationRequest->parking_lot_id, $reservationRequest->vehicle_type)
                 ]);
-
                 // 5. Cập nhật Request → assigned
                 $reservationRequest->update(['status' => 'assigned']);
 
@@ -516,6 +545,12 @@ class ReservationController extends Controller
                         'algorithm_used' => $algorithm,
                         'processing_time_ms' => $reservationRequest->processing_time_ms,
                         'qr_payload' => $reservation->reservation_code, // dùng làm QR
+                        'monthly_pass' => $monthlyPass && $monthlyPass->isValid($start->toDateString()) ? [
+                            'id' => $monthlyPass->id,
+                            'order_id' => $monthlyPass->order_id,
+                            'end_date' => $monthlyPass->end_date?->toDateString(),
+                            'message' => 'Vé tháng của bạn sẽ được áp dụng khi checkout (miễn phí)',
+                        ] : null,
                     ]
                 ], 201);
             }
@@ -804,7 +839,7 @@ class ReservationController extends Controller
      */
     public function show($id)
     {
-        $reservation = Reservation::with(['slot.parkingLot', 'reservationRequest'])->findOrFail($id);
+        $reservation = Reservation::with(['slot.parkingLot', 'reservationRequest', 'payment'])->findOrFail($id);
 
         return response()->json([
             'success' => true,
@@ -812,7 +847,6 @@ class ReservationController extends Controller
             'data' => $reservation
         ]);
     }
-
 
     /**
      * @OA\Put(
@@ -875,10 +909,68 @@ class ReservationController extends Controller
         // Slot chuyển sang occupied
         $reservation->slot->update(['status' => 'occupied']);
 
+        // ✅ Reload reservation để lấy dữ liệu mới nhất
+        $reservation->refresh();
+
+        // ✅ Kiểm tra monthly pass sau khi check-in
+        $monthlyPass = MonthlyPass::findValidPass(
+            $reservation->user_id,
+            $reservation->vehicle_id,
+            $reservation->slot->parking_lot_id,
+            $reservation->check_in_at ? $reservation->check_in_at->toDateString() : null
+        );
+
+        $hasMonthlyPass = $monthlyPass && $monthlyPass->isValid($reservation->check_in_at);
+
+        $responseData = [
+            'reservation' => $reservation,
+        ];
+
+        // ✅ Nếu có monthly pass, tạo checkout code ngay
+        if ($hasMonthlyPass) {
+            // Tạo Payment với amount = 0 (miễn phí)
+            $payment = Payment::create([
+                'order_id' => $reservation->reservation_code,
+                'reservation_id' => $reservation->id,
+                'amount' => 0,
+                'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
+                'status' => 'PAID', // Tự động PAID vì có monthly pass
+                'paid_at' => now(),
+                'meta' => [
+                    'payment_method' => 'monthly_pass',
+                    'monthly_pass_id' => $monthlyPass->id,
+                    'is_free' => true,
+                ],
+            ]);
+
+            // Cập nhật reservation với payment_id
+            $reservation->update(['payment_id' => $payment->id]);
+
+            // Tạo checkout code
+            $checkoutCode = $this->createCheckoutCode($reservation, $payment);
+
+            // Thêm thông tin checkout code vào response
+            $responseData['checkout_code'] = [
+                'checkout_code' => $checkoutCode->checkout_code,
+                'status' => $checkoutCode->status,
+                'expires_at' => $checkoutCode->expires_at?->toIso8601String(),
+                'qr_data' => $checkoutCode->checkout_code,
+            ];
+            $responseData['monthly_pass'] = [
+                'id' => $monthlyPass->id,
+                'order_id' => $monthlyPass->order_id,
+                'end_date' => $monthlyPass->end_date?->toDateString(),
+            ];
+            $responseData['is_free'] = true;
+            $responseData['skip_payment'] = true; // Flag để frontend biết bỏ qua bước thanh toán
+        }
+
         return response()->json([
             'success' => true,
-            'message' => 'Check-in thành công',
-            'data' => $reservation
+            'message' => $hasMonthlyPass
+                ? 'Check-in thành công. Vé tháng của bạn đã được áp dụng. Vui lòng quét mã checkout khi ra khỏi bãi đỗ.'
+                : 'Check-in thành công',
+            'data' => $responseData
         ]);
     }
 
@@ -887,13 +979,19 @@ class ReservationController extends Controller
      *     path="/reservations/{id}/check-out",
      *     tags={"🎫 Reservations"},
      *     summary="Check-out khỏi bãi đỗ",
-     *     description="Chuyển reservation từ checked_in sang checked_out. Slot sẽ chuyển về available và ReservationRequest được đóng.",
+     *     description="Chuyển reservation từ checked_in sang pending_checkout (thanh toán online) hoặc checked_out (thanh toán trực tiếp).",
      *     @OA\Parameter(
      *         name="id",
      *         in="path",
      *         required=true,
      *         description="ID của reservation",
      *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=false,
+     *         @OA\JsonContent(
+     *             @OA\Property(property="payment_method", type="string", enum={"online", "offline"}, example="online", description="Phương thức thanh toán: online (tạo QR checkout) hoặc offline (thanh toán trực tiếp)")
+     *         )
      *     ),
      *     @OA\Response(
      *         response=200,
@@ -903,10 +1001,12 @@ class ReservationController extends Controller
      *             @OA\Property(property="message", type="string", example="Check-out thành công"),
      *             @OA\Property(property="data", type="object",
      *                 @OA\Property(property="id", type="integer", example=101),
-     *                 @OA\Property(property="status", type="string", example="checked_out"),
+     *                 @OA\Property(property="status", type="string", example="pending_checkout"),
      *                 @OA\Property(property="check_in_at", type="string", format="date-time", example="2025-10-19T15:30:00Z"),
      *                 @OA\Property(property="check_out_at", type="string", format="date-time", example="2025-10-19T17:45:00Z"),
-     *                 @OA\Property(property="slot_id", type="integer", example=55)
+     *                 @OA\Property(property="slot_id", type="integer", example=55),
+     *                 @OA\Property(property="payment", type="object"),
+     *                 @OA\Property(property="amount", type="integer", example=50000)
      *             )
      *         )
      *     ),
@@ -924,42 +1024,204 @@ class ReservationController extends Controller
      *     )
      * )
      */
-    public function checkOut($id)
+    public function checkOut(Request $request, $id)
     {
         $reservation = Reservation::findOrFail($id);
 
-        if ($reservation->status !== 'checked_in') {
+        if ($reservation->status !== 'checked_in' && $reservation->status !== 'pending_checkout') {
             return response()->json([
                 'success' => false,
-                'message' => 'Chỉ có thể check-out reservation đang checked_in'
+                'message' => 'Chỉ có thể check-out reservation đang checked_in hoặc pending_checkout. Trạng thái hiện tại: ' . $reservation->status
             ], 422);
+        }
+
+        $paymentMethod = $request->input('payment_method', 'online'); // Mặc định là online
+
+        // ✅ Kiểm tra monthly pass trước khi tính phí
+        $monthlyPass = MonthlyPass::findValidPass(
+            $reservation->user_id,
+            $reservation->vehicle_id,
+            $reservation->slot->parking_lot_id,
+            $reservation->check_in_at ? $reservation->check_in_at->toDateString() : null
+        );
+
+        $hasMonthlyPass = $monthlyPass && $monthlyPass->isValid($reservation->check_in_at);
+
+        // ✅ Kiểm tra xem đã có payment chưa (từ check-in với monthly pass)
+        $payment = $reservation->payment;
+
+        if (!$payment) {
+            // Chưa có payment, tạo mới
+            // Tính toán giá tiền dựa trên pricing snapshot
+            $amount = $this->calculatePaymentAmount($reservation);
+
+            // Tạo Payment (nếu có monthly pass thì amount = 0, nhưng vẫn tạo payment record)
+            $payment = Payment::create([
+                'order_id' => $reservation->reservation_code,
+                'reservation_id' => $reservation->id,
+                'amount' => $amount,
+                'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
+                'status' => $hasMonthlyPass ? 'PAID' : 'PENDING', // Nếu có monthly pass thì tự động PAID
+                'meta' => [
+                    'payment_method' => $paymentMethod,
+                    'monthly_pass_id' => $hasMonthlyPass ? $monthlyPass->id : null,
+                    'is_free' => $hasMonthlyPass,
+                ],
+            ]);
+        } else {
+            // Đã có payment, lấy amount từ payment hiện có
+            $amount = $payment->amount;
+        }
+
+        // Xác định status dựa trên payment method và monthly pass
+        if ($hasMonthlyPass) {
+            // Có monthly pass → checked_out ngay (miễn phí, không cần thanh toán)
+            $newStatus = 'checked_out';
+            $reservation->slot->update(['status' => 'available']);
+            $this->finalizeRequestIfAny($reservation);
+        } elseif ($paymentMethod === 'offline') {
+            // Thanh toán trực tiếp → pending_checkout (đã thanh toán trực tiếp, chờ nhân viên quét)
+            $newStatus = 'pending_checkout';
+            // Không giải phóng slot ngay, chờ nhân viên quét để finalize
+        } else {
+            // Thanh toán online → pending_payment (chưa thanh toán)
+            $newStatus = 'pending_payment';
         }
 
         // Cập nhật reservation
         $reservation->update([
-            'status' => 'checked_out',
-            'check_out_at' => now()
+            'status' => $newStatus,
+            'check_out_at' => now(),
+            'payment_id' => $payment->id,
         ]);
 
-        // Slot chuyển về available
-        $reservation->slot->update(['status' => 'available']);
+        // ✅ Lấy checkout code nếu có
+        $checkoutCode = CheckoutCode::where('reservation_id', $reservation->id)
+            ->where('status', 'active')
+            ->latest()
+            ->first();
 
-        $this->finalizeRequestIfAny($reservation);
+        $responseData = [
+            'reservation' => $reservation,
+            'payment' => $payment,
+            'amount' => $amount,
+            'payment_method' => $paymentMethod,
+            'monthly_pass' => $hasMonthlyPass ? [
+                'id' => $monthlyPass->id,
+                'order_id' => $monthlyPass->order_id,
+                'end_date' => $monthlyPass->end_date?->toDateString(),
+            ] : null,
+            'is_free' => $hasMonthlyPass,
+        ];
+
+        // ✅ Nếu có checkout code, thêm vào response
+        if ($checkoutCode) {
+            $responseData['checkout_code'] = [
+                'checkout_code' => $checkoutCode->checkout_code,
+                'status' => $checkoutCode->status,
+                'expires_at' => $checkoutCode->expires_at?->toIso8601String(),
+                'qr_data' => $checkoutCode->checkout_code,
+            ];
+        }
+
+        $message = $hasMonthlyPass
+            ? 'Check-out thành công. Vé tháng của bạn đã được áp dụng (miễn phí).'
+            : ($paymentMethod === 'offline'
+                ? 'Check-out thành công (thanh toán trực tiếp)'
+                : 'Check-out thành công. Vui lòng thanh toán để nhận mã QR checkout.');
 
         return response()->json([
             'success' => true,
-            'message' => 'Check-out thành công',
-            'data' => $reservation
+            'message' => $message,
+            'data' => $responseData
         ]);
     }
 
+    private function calculatePaymentAmount(Reservation $reservation): int
+    {
+        // ✅ Kiểm tra monthly pass trước - nếu có thì miễn phí
+        $monthlyPass = MonthlyPass::findValidPass(
+            $reservation->user_id,
+            $reservation->vehicle_id,
+            $reservation->slot->parking_lot_id,
+            $reservation->check_in_at ? $reservation->check_in_at->toDateString() : null
+        );
 
+        if ($monthlyPass && $monthlyPass->isValid($reservation->check_in_at)) {
+            // Có vé tháng hợp lệ → miễn phí
+            return 0;
+        }
+
+        // Nếu không có monthly pass, tính phí bình thường
+        $pricing = $reservation->pricing_snapshot;
+
+        if (!$pricing || empty($pricing['hourly'])) {
+            return 0;
+        }
+
+        $checkIn = Carbon::parse($reservation->check_in_at);
+        // Dùng check_out_at nếu có, nếu không dùng thời điểm hiện tại
+        $checkOut = $reservation->check_out_at
+            ? Carbon::parse($reservation->check_out_at)
+            : now();
+        $durationMinutes = $checkIn->diffInMinutes($checkOut);
+
+        // Làm tròn theo rounding_minutes (ví dụ: 30 phút)
+        $roundingMinutes = $pricing['rounding_minutes'] ?? 30;
+        $roundedMinutes = ceil($durationMinutes / $roundingMinutes) * $roundingMinutes;
+
+        // Tính số giờ
+        $hours = $roundedMinutes / 60;
+
+        // Giá cơ bản
+        $amount = $pricing['hourly'] * $hours;
+
+        // Áp dụng peak hour multiplier nếu có
+        if ($pricing['peak_enabled'] && $pricing['peak_multiplier']) {
+            // Kiểm tra xem có rơi vào giờ cao điểm không
+            $isPeakHour = $this->isPeakHour($checkIn, $checkOut, $reservation->slot->parking_lot_id);
+            if ($isPeakHour) {
+                $amount = $amount * $pricing['peak_multiplier'];
+            }
+        }
+
+        // Áp dụng daily cap
+        if ($pricing['daily_cap'] && $amount > $pricing['daily_cap']) {
+            $amount = $pricing['daily_cap'];
+        }
+
+        return (int) ceil($amount);
+    }
+
+    private function isPeakHour(Carbon $checkIn, Carbon $checkOut, int $parkingLotId): bool
+    {
+        $peakHours = PeakHour::forParkingLot($parkingLotId)->get();
+
+        foreach ($peakHours as $peak) {
+            if (!$peak->is_active)
+                continue;
+
+            $dayOfWeek = $checkIn->dayOfWeek;
+            if ($dayOfWeek != $peak->day_of_week)
+                continue;
+
+            $startTime = Carbon::parse($peak->start_time)->setDateFrom($checkIn);
+            $endTime = Carbon::parse($peak->end_time)->setDateFrom($checkIn);
+
+            // Kiểm tra có chồng lấn không
+            if ($checkIn->lt($endTime) && $checkOut->gt($startTime)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
     /**
      * @OA\Post(
-     *     path="/demo/check-in",
+     *     path="/reservations/demo/check-in",
      *     tags={"🎫 Reservations"},
      *     summary="Demo check-in bằng reservation_code",
-     *     description="Check-in bằng reservation_code thay vì ID, dễ demo hơn.",
+     *     description="Check-in bằng reservation_code thay vì ID, dễ demo hơn. Chỉ áp dụng khi reservation đang confirmed.",
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
@@ -969,7 +1231,7 @@ class ReservationController extends Controller
      *     ),
      *     @OA\Response(response=200, description="Check-in thành công"),
      *     @OA\Response(response=404, description="Không tìm thấy reservation"),
-     *     @OA\Response(response=422, description="Không thể check-in")
+     *     @OA\Response(response=422, description="Không thể check-in do không đúng trạng thái")
      * )
      */
     public function demoCheckIn(Request $request)
@@ -978,40 +1240,154 @@ class ReservationController extends Controller
             'reservation_code' => 'required|string'
         ]);
 
-        $reservation = Reservation::where('reservation_code', $validated['reservation_code'])->first();
+        // ✅ Trim và uppercase để đảm bảo format đúng
+        $reservationCode = strtoupper(trim($validated['reservation_code']));
+
+        $reservation = Reservation::where('reservation_code', $reservationCode)->first();
 
         if (!$reservation) {
+            // ✅ Lấy danh sách 5 reservation codes gần nhất để user tham khảo
+            $recentReservations = Reservation::latest()
+                ->take(5)
+                ->pluck('reservation_code', 'id')
+                ->toArray();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Không tìm thấy reservation với mã này'
+                'message' => 'Không tìm thấy reservation với mã này',
+                'debug' => [
+                    'input' => $validated['reservation_code'],
+                    'normalized' => $reservationCode,
+                    'hint' => 'Format: RES-XXXXXXXX-YYYYMMDD (ví dụ: RES-AB12CD34-20251110)',
+                    'recent_reservation_codes' => array_values($recentReservations),
+                    'total_reservations' => Reservation::count()
+                ]
             ], 404);
         }
 
-        return $this->checkIn($reservation->id);
+        // ✅ Kiểm tra status trước khi check-in
+        if ($reservation->status !== 'confirmed') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chỉ có thể check-in reservation đang confirmed. Trạng thái hiện tại: ' . $reservation->status
+            ], 422);
+        }
+
+        // ✅ Cập nhật reservation trực tiếp (không gọi checkIn())
+        $reservation->update([
+            'status' => 'checked_in',
+            'check_in_at' => now()
+        ]);
+
+        // ✅ Slot chuyển sang occupied
+        $reservation->slot->update(['status' => 'occupied']);
+
+        // ✅ Reload reservation để lấy dữ liệu mới nhất
+        $reservation->refresh();
+
+        // ✅ Kiểm tra monthly pass sau khi check-in
+        $monthlyPass = MonthlyPass::findValidPass(
+            $reservation->user_id,
+            $reservation->vehicle_id,
+            $reservation->slot->parking_lot_id,
+            $reservation->check_in_at ? $reservation->check_in_at->toDateString() : null
+        );
+
+        $hasMonthlyPass = $monthlyPass && $monthlyPass->isValid($reservation->check_in_at);
+
+        $responseData = [
+            'reservation' => $reservation,
+        ];
+
+        // ✅ Nếu có monthly pass, tạo checkout code ngay
+        if ($hasMonthlyPass) {
+            // Tạo Payment với amount = 0 (miễn phí)
+            $payment = Payment::create([
+                'order_id' => $reservation->reservation_code,
+                'reservation_id' => $reservation->id,
+                'amount' => 0,
+                'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
+                'status' => 'PAID', // Tự động PAID vì có monthly pass
+                'paid_at' => now(),
+                'meta' => [
+                    'payment_method' => 'monthly_pass',
+                    'monthly_pass_id' => $monthlyPass->id,
+                    'is_free' => true,
+                ],
+            ]);
+
+            // Cập nhật reservation với payment_id
+            $reservation->update(['payment_id' => $payment->id]);
+
+            // Tạo checkout code
+            $checkoutCode = $this->createCheckoutCode($reservation, $payment);
+
+            // Thêm thông tin checkout code vào response
+            $responseData['checkout_code'] = [
+                'checkout_code' => $checkoutCode->checkout_code,
+                'status' => $checkoutCode->status,
+                'expires_at' => $checkoutCode->expires_at?->toIso8601String(),
+                'qr_data' => $checkoutCode->checkout_code,
+            ];
+            $responseData['monthly_pass'] = [
+                'id' => $monthlyPass->id,
+                'order_id' => $monthlyPass->order_id,
+                'end_date' => $monthlyPass->end_date?->toDateString(),
+            ];
+            $responseData['is_free'] = true;
+            $responseData['skip_payment'] = true; // Flag để frontend biết bỏ qua bước thanh toán
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $hasMonthlyPass
+                ? 'Check-in thành công. Vé tháng của bạn đã được áp dụng. Vui lòng quét mã checkout khi ra khỏi bãi đỗ.'
+                : 'Check-in thành công',
+            'data' => $responseData
+        ]);
     }
 
     /**
      * @OA\Post(
-     *     path="/demo/check-out",
+     *     path="/reservations/demo/check-out",
      *     tags={"🎫 Reservations"},
      *     summary="Demo check-out bằng reservation_code",
-     *     description="Check-out bằng reservation_code thay vì ID, dễ demo hơn.",
+     *     description="Check-out bằng reservation_code thay vì ID, dễ demo hơn. Chỉ áp dụng khi reservation đang checked_in.",
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
      *             required={"reservation_code"},
-     *             @OA\Property(property="reservation_code", type="string", example="RES-AB12CD34-20251019")
+     *             @OA\Property(property="reservation_code", type="string", example="RES-AB12CD34-20251019", description="Mã reservation code"),
+     *             @OA\Property(property="payment_method", type="string", enum={"online", "offline"}, example="online", description="Phương thức thanh toán: online (tạo pending_checkout) hoặc offline (checked_out ngay)")
      *         )
      *     ),
-     *     @OA\Response(response=200, description="Check-out thành công"),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Check-out thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string", example="Check-out thành công"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="reservation", type="object",
+     *                     @OA\Property(property="id", type="integer", example=101),
+     *                     @OA\Property(property="status", type="string", example="pending_checkout"),
+     *                     @OA\Property(property="check_out_at", type="string", format="date-time", example="2025-10-19T17:45:00Z")
+     *                 ),
+     *                 @OA\Property(property="payment", type="object"),
+     *                 @OA\Property(property="amount", type="integer", example=50000),
+     *                 @OA\Property(property="payment_method", type="string", example="online")
+     *             )
+     *         )
+     *     ),
      *     @OA\Response(response=404, description="Không tìm thấy reservation"),
-     *     @OA\Response(response=422, description="Không thể check-out")
+     *     @OA\Response(response=422, description="Không thể check-out do không đúng trạng thái")
      * )
      */
     public function demoCheckOut(Request $request)
     {
         $validated = $request->validate([
-            'reservation_code' => 'required|string'
+            'reservation_code' => 'required|string',
+            'payment_method' => 'nullable|string|in:online,offline' // payment_method
         ]);
 
         $reservation = Reservation::where('reservation_code', $validated['reservation_code'])->first();
@@ -1023,7 +1399,66 @@ class ReservationController extends Controller
             ], 404);
         }
 
-        return $this->checkOut($reservation->id);
+        //  pending_checkout → finalize checkout
+        if ($reservation->status === 'pending_checkout') {
+            // Kiểm tra payment đã PAID chưa (cho online payment)
+            $payment = $reservation->payment;
+            if ($payment) {
+                $paymentMethod = is_array($payment->meta) ? ($payment->meta['payment_method'] ?? null) : null;
+
+                // Nếu là offline payment và chưa PAID → cập nhật thành PAID
+                if ($paymentMethod === 'offline' && $payment->status !== 'PAID') {
+                    $payment->update([
+                        'status' => 'PAID',
+                        'paid_at' => now()
+                    ]);
+                }
+
+                // Kiểm tra online payment phải đã PAID
+                if ($paymentMethod === 'online' && $payment->status !== 'PAID') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Payment chưa được thanh toán thành công. Không thể finalize checkout.'
+                    ], 422);
+                }
+            }
+
+            // Finalize checkout: pending_checkout → checked_out
+            $reservation->update([
+                'status' => 'checked_out',
+            ]);
+
+            // Giải phóng slot
+            $reservation->slot->update(['status' => 'available']);
+
+            // Finalize request
+            $this->finalizeRequestIfAny($reservation);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Checkout hoàn tất thành công',
+                'data' => [
+                    'reservation' => $reservation,
+                    'payment' => $payment,
+                ]
+            ]);
+        }
+
+        // ✅ Nếu reservation đang ở checked_in → checkout bình thường
+        if ($reservation->status === 'checked_in') {
+            // ✅ Truyền payment_method vào request nếu có
+            if (isset($validated['payment_method'])) {
+                $request->merge(['payment_method' => $validated['payment_method']]);
+            }
+
+            return $this->checkOut($request, $reservation->id);
+        }
+
+        // Trạng thái khác không hợp lệ
+        return response()->json([
+            'success' => false,
+            'message' => 'Reservation không ở trạng thái hợp lệ để checkout. Trạng thái hiện tại: ' . $reservation->status
+        ], 422);
     }
 
     /**
@@ -1049,16 +1484,270 @@ class ReservationController extends Controller
      */
     public function expireDue()
     {
-        $expiredCount = Reservation::where('status', 'confirmed')
+        // Lấy các reservations cần expire (confirmed và quá expires_at)
+        $expiredReservations = Reservation::where('status', 'confirmed')
             ->where('expires_at', '<', now())
-            ->update([
+            ->with(['slot', 'reservationRequest'])
+            ->get();
+
+        $expiredCount = 0;
+
+        foreach ($expiredReservations as $reservation) {
+            // Cập nhật status thành expired
+            $reservation->update([
                 'status' => 'expired'
             ]);
+
+            // Giải phóng slot nếu đang occupied
+            if ($reservation->slot && $reservation->slot->status === 'occupied') {
+                $reservation->slot->update(['status' => 'available']);
+            }
+
+            // Finalize request
+            $this->finalizeRequestIfAny($reservation, 'expired');
+
+            $expiredCount++;
+        }
 
         return response()->json([
             'success' => true,
             'message' => "Đã hết hạn {$expiredCount} reservations",
             'data' => ['expired_count' => $expiredCount]
+        ]);
+    }
+
+    /**
+     * @OA\Get(
+     *     path="/reservations/user/{user_id}/history",
+     *     tags={"🎫 Reservations"},
+     *     summary="Lấy toàn bộ lịch sử đặt chỗ của người dùng",
+     *     description="Lấy lịch sử đặt chỗ đầy đủ thông tin bao gồm: thông tin bãi đỗ, slot, trạng thái thanh toán, và các thông tin chi tiết khác",
+     *     @OA\Parameter(
+     *         name="user_id",
+     *         in="path",
+     *         required=true,
+     *         description="ID của người dùng",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="status",
+     *         in="query",
+     *         required=false,
+     *         description="Filter theo trạng thái",
+     *         @OA\Schema(type="string", enum={"confirmed","checked_in","checked_out","cancelled","expired"})
+     *     ),
+     *     @OA\Parameter(
+     *         name="date_from",
+     *         in="query",
+     *         required=false,
+     *         description="Từ ngày (ISO 8601)",
+     *         @OA\Schema(type="string", format="date-time")
+     *     ),
+     *     @OA\Parameter(
+     *         name="date_to",
+     *         in="query",
+     *         required=false,
+     *         description="Đến ngày (ISO 8601)",
+     *         @OA\Schema(type="string", format="date-time")
+     *     ),
+     *     @OA\Parameter(
+     *         name="page",
+     *         in="query",
+     *         required=false,
+     *         description="Trang hiện tại",
+     *         @OA\Schema(type="integer", default=1)
+     *     ),
+     *     @OA\Parameter(
+     *         name="per_page",
+     *         in="query",
+     *         required=false,
+     *         description="Số bản ghi mỗi trang",
+     *         @OA\Schema(type="integer", default=15)
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Lịch sử đặt chỗ",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="object",
+     *                 @OA\Property(
+     *                     property="reservations",
+     *                     type="array",
+     *                     @OA\Items(
+     *                         type="object",
+     *                         @OA\Property(property="id", type="integer", example=101),
+     *                         @OA\Property(property="reservation_code", type="string", example="RES-AB12CD34-20251019"),
+     *                         @OA\Property(property="status", type="string", example="checked_out"),
+     *                         @OA\Property(property="start_time", type="string", format="date-time"),
+     *                         @OA\Property(property="end_time", type="string", format="date-time"),
+     *                         @OA\Property(property="expires_at", type="string", format="date-time", nullable=true),
+     *                         @OA\Property(property="check_in_at", type="string", format="date-time", nullable=true),
+     *                         @OA\Property(property="check_out_at", type="string", format="date-time", nullable=true),
+     *                         @OA\Property(property="cancelled_at", type="string", format="date-time", nullable=true),
+     *                         @OA\Property(property="duration_minutes", type="integer", nullable=true, example=150),
+     *                         @OA\Property(property="extension_count", type="integer", example=0),
+     *                         @OA\Property(
+     *                             property="slot",
+     *                             type="object",
+     *                             @OA\Property(property="id", type="integer", example=55),
+     *                             @OA\Property(property="slot_code", type="string", example="C4-012"),
+     *                             @OA\Property(property="vehicle_type", type="string", example="car_4_seat"),
+     *                             @OA\Property(property="status", type="string", example="available"),
+     *                             @OA\Property(
+     *                                 property="parking_lot",
+     *                                 type="object",
+     *                                 @OA\Property(property="id", type="integer", example=1),
+     *                                 @OA\Property(property="name", type="string", example="Tầng hầm B1"),
+     *                                 @OA\Property(property="gate_pos_x", type="number", example=10.806176400733412),
+     *                                 @OA\Property(property="gate_pos_y", type="number", example=106.6286676510779)
+     *                             )
+     *                         ),
+     *                         @OA\Property(
+     *                             property="user_snapshot",
+     *                             type="object",
+     *                             @OA\Property(property="id", type="integer", example=12),
+     *                             @OA\Property(property="name", type="string", example="Nguyễn Văn A"),
+     *                             @OA\Property(property="email", type="string", example="user@example.com"),
+     *                             @OA\Property(property="phone", type="string", example="0123456789")
+     *                         ),
+     *                         @OA\Property(
+     *                             property="vehicle_snapshot",
+     *                             type="object",
+     *                             @OA\Property(property="id", type="integer", example=34),
+     *                             @OA\Property(property="license_plate", type="string", example="29A-12345"),
+     *                             @OA\Property(property="vehicle_type", type="string", example="motorbike")
+     *                         ),
+     *                         @OA\Property(
+     *                             property="pricing_snapshot",
+     *                             type="object",
+     *                             @OA\Property(property="id", type="integer", example=1),
+     *                             @OA\Property(property="vehicle_type", type="string", example="car_4_seat"),
+     *                             @OA\Property(property="hourly", type="integer", example=5000),
+     *                             @OA\Property(property="daily_cap", type="integer", example=50000),
+     *                             @OA\Property(property="monthly_pass", type="integer", example=300000)
+     *                         ),
+     *                         @OA\Property(
+     *                             property="payment",
+     *                             type="object",
+     *                             nullable=true,
+     *                             @OA\Property(property="id", type="integer", example=1),
+     *                             @OA\Property(property="order_id", type="string", example="RES-AB12CD34-20251019"),
+     *                             @OA\Property(property="amount", type="integer", example=50000),
+     *                             @OA\Property(property="status", type="string", enum={"PENDING","PAID","FAILED"}, example="PAID"),
+     *                             @OA\Property(property="txn_ref", type="string", example="ORD20251018093000123"),
+     *                             @OA\Property(property="created_at", type="string", format="date-time")
+     *                         ),
+     *                         @OA\Property(property="created_at", type="string", format="date-time"),
+     *                         @OA\Property(property="updated_at", type="string", format="date-time")
+     *                     )
+     *                 ),
+     *                 @OA\Property(
+     *                     property="pagination",
+     *                     type="object",
+     *                     @OA\Property(property="current_page", type="integer", example=1),
+     *                     @OA\Property(property="per_page", type="integer", example=15),
+     *                     @OA\Property(property="total", type="integer", example=45),
+     *                     @OA\Property(property="last_page", type="integer", example=3)
+     *                 ),
+     *                 @OA\Property(
+     *                     property="summary",
+     *                     type="object",
+     *                     @OA\Property(property="total_reservations", type="integer", example=45),
+     *                     @OA\Property(property="confirmed", type="integer", example=2),
+     *                     @OA\Property(property="checked_in", type="integer", example=5),
+     *                     @OA\Property(property="checked_out", type="integer", example=30),
+     *                     @OA\Property(property="cancelled", type="integer", example=5),
+     *                     @OA\Property(property="expired", type="integer", example=3),
+     *                     @OA\Property(property="total_paid", type="integer", example=1500000),
+     *                     @OA\Property(property="total_pending", type="integer", example=50000)
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Không tìm thấy user"
+     *     )
+     * )
+     */
+    public function getUserHistory(Request $request, $userId)
+    {
+        $query = Reservation::with(['slot.parkingLot'])
+            ->where('user_id', $userId);
+
+        // Filter theo status
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        // Filter theo date range
+        if ($request->filled('date_from')) {
+            $query->where('created_at', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $query->where('created_at', '<=', $request->date_to);
+        }
+
+        // Sort mặc định: mới nhất trước
+        $query->orderByDesc('created_at');
+
+        // Pagination
+        $perPage = $request->get('per_page', 15);
+        $reservations = $query->paginate($perPage);
+
+        // Lấy thông tin payment cho mỗi reservation
+        $reservations->getCollection()->transform(function ($reservation) {
+            // Tìm payment theo order_id (có thể là reservation_code) hoặc trong meta
+            $payment = Payment::where('order_id', $reservation->reservation_code)
+                ->orWhere(function ($q) use ($reservation) {
+                    $q->whereJsonContains('meta->reservation_id', $reservation->id);
+                })
+                ->orderByDesc('created_at')
+                ->first();
+
+            // Thêm payment vào reservation
+            $reservation->payment = $payment;
+
+            return $reservation;
+        });
+
+        // Summary statistics
+        $summaryQuery = Reservation::where('user_id', $userId);
+        $summary = [
+            'total_reservations' => $summaryQuery->count(),
+            'confirmed' => $summaryQuery->clone()->where('status', 'confirmed')->count(),
+            'checked_in' => $summaryQuery->clone()->where('status', 'checked_in')->count(),
+            'checked_out' => $summaryQuery->clone()->where('status', 'checked_out')->count(),
+            'cancelled' => $summaryQuery->clone()->where('status', 'cancelled')->count(),
+            'expired' => $summaryQuery->clone()->where('status', 'expired')->count(),
+        ];
+
+        // Tính tổng tiền đã thanh toán và đang chờ
+        $paidPayments = Payment::whereIn('order_id', $reservations->pluck('reservation_code'))
+            ->where('status', 'PAID')
+            ->sum('amount');
+
+        $pendingPayments = Payment::whereIn('order_id', $reservations->pluck('reservation_code'))
+            ->where('status', 'PENDING')
+            ->sum('amount');
+
+        $summary['total_paid'] = (int) $paidPayments;
+        $summary['total_pending'] = (int) $pendingPayments;
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'reservations' => $reservations->items(),
+                'pagination' => [
+                    'current_page' => $reservations->currentPage(),
+                    'per_page' => $reservations->perPage(),
+                    'total' => $reservations->total(),
+                    'last_page' => $reservations->lastPage(),
+                ],
+                'summary' => $summary
+            ]
         ]);
     }
 
@@ -1114,5 +1803,193 @@ class ReservationController extends Controller
                     'processed_at' => now(),
                 ]);
         }
+    }
+
+    /**
+     * Tạo QR checkout code sau khi thanh toán thành công hoặc có monthly pass
+     */
+    private function createCheckoutCode(Reservation $reservation, Payment $payment): CheckoutCode
+    {
+        // Tạo mã checkout code duy nhất
+        $checkoutCode = 'CHK-' . strtoupper(Str::random(8)) . '-' . now()->format('Ymd');
+
+        // Kiểm tra mã đã tồn tại chưa (rất hiếm nhưng để an toàn)
+        while (CheckoutCode::where('checkout_code', $checkoutCode)->exists()) {
+            $checkoutCode = 'CHK-' . strtoupper(Str::random(8)) . '-' . now()->format('Ymd');
+        }
+
+        // Tạo checkout code với thời gian hết hạn 24 giờ
+        $checkoutCodeModel = CheckoutCode::create([
+            'reservation_id' => $reservation->id,
+            'payment_id' => $payment->id,
+            'checkout_code' => $checkoutCode,
+            'status' => 'active',
+            'expires_at' => now()->addHours(24),
+        ]);
+
+        return $checkoutCodeModel;
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/reservations/scan-checkout",
+     *     tags={"🎫 Reservations"},
+     *     summary="Quét QR checkout code để hoàn tất checkout",
+     *     description="Quét QR checkout code để chuyển reservation từ pending_checkout sang checked_out. Chỉ dành cho nhân viên hoặc hệ thống.",
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"checkout_code"},
+     *             @OA\Property(property="checkout_code", type="string", example="CHK-ABC12345-20251110")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Checkout thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string", example="Checkout thành công"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="reservation", type="object"),
+     *                 @OA\Property(property="checkout_code", type="object")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Không tìm thấy checkout code"
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Checkout code không hợp lệ hoặc đã sử dụng"
+     *     )
+     *     )
+     */
+    public function scanCheckoutCode(Request $request)
+    {
+        $validated = $request->validate([
+            'checkout_code' => 'required|string',
+        ]);
+
+        $checkoutCode = CheckoutCode::where('checkout_code', $validated['checkout_code'])->first();
+
+        if (!$checkoutCode) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy mã checkout'
+            ], 404);
+        }
+
+        // Kiểm tra mã còn hiệu lực không
+        if (!$checkoutCode->isValid()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Mã checkout đã hết hạn hoặc đã được sử dụng'
+            ], 422);
+        }
+
+        $reservation = $checkoutCode->reservation;
+
+        // Kiểm tra reservation status
+        if ($reservation->status !== 'pending_checkout') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reservation không ở trạng thái pending_checkout'
+            ], 422);
+        }
+
+        // Finalize checkout
+        $reservation->update([
+            'status' => 'checked_out',
+        ]);
+
+        // Giải phóng slot
+        $reservation->slot->update(['status' => 'available']);
+
+        // Finalize request
+        $this->finalizeRequestIfAny($reservation);
+
+        // Đánh dấu checkout code đã sử dụng
+        $checkoutCode->markAsUsed();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Checkout thành công',
+            'data' => [
+                'reservation' => $reservation,
+                'checkout_code' => $checkoutCode,
+            ]
+        ]);
+    }
+
+    /**
+     * @OA\Get(
+     *     path="/reservations/{id}/checkout-code",
+     *     tags={"🎫 Reservations"},
+     *     summary="Lấy QR checkout code cho reservation",
+     *     description="Lấy QR checkout code đã được tạo sau khi thanh toán thành công. Chỉ áp dụng cho reservation có status = pending_checkout.",
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         description="ID của reservation",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Lấy checkout code thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="checkout_code", type="string", example="CHK-ABC12345-20251110"),
+     *                 @OA\Property(property="status", type="string", example="active"),
+     *                 @OA\Property(property="expires_at", type="string", format="date-time"),
+     *                 @OA\Property(property="qr_data", type="string", description="Dữ liệu để tạo QR code")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Không tìm thấy reservation hoặc checkout code"
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Reservation không ở trạng thái pending_checkout"
+     *     )
+     *     )
+     */
+    public function getCheckoutCode($id)
+    {
+        $reservation = Reservation::findOrFail($id);
+
+        if ($reservation->status !== 'pending_checkout') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reservation không ở trạng thái pending_checkout'
+            ], 422);
+        }
+
+        // Tìm checkout code active
+        $checkoutCode = CheckoutCode::where('reservation_id', $reservation->id)
+            ->where('status', 'active')
+            ->latest()
+            ->first();
+
+        if (!$checkoutCode) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chưa có mã checkout. Vui lòng thanh toán trước.'
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'checkout_code' => $checkoutCode->checkout_code,
+                'status' => $checkoutCode->status,
+                'expires_at' => $checkoutCode->expires_at?->toIso8601String(),
+                'qr_data' => $checkoutCode->checkout_code, // Dữ liệu để tạo QR code
+            ]
+        ]);
     }
 }

@@ -45,12 +45,24 @@ class ParkingSlot extends Model
 
     public function scopeWithActiveReservations($query)
     {
-        $now = now();
         return $query->with([
-            'currentReservation' => function ($query) use ($now) {
-                $query->where('status', 'confirmed')
-                    ->where('start_time', '<=', $now)
-                    ->where('expires_at', '>=', $now);
+            'currentReservation' => function ($query) {
+                $now = now();
+                $query->whereIn('status', ['confirmed', 'checked_in'])
+                    ->where(function ($q) use ($now) {
+                        // Confirmed: check expires_at
+                        $q->where(function ($qq) use ($now) {
+                            $qq->where('status', 'confirmed')
+                                ->where('start_time', '<=', $now)
+                                ->where('expires_at', '>=', $now);
+                        })
+                            // Checked_in: check end_time
+                            ->orWhere(function ($qq) use ($now) {
+                            $qq->where('status', 'checked_in')
+                                ->where('start_time', '<=', $now)
+                                ->where('end_time', '>=', $now);
+                        });
+                    });
             }
         ]);
     }
@@ -66,10 +78,7 @@ class ParkingSlot extends Model
         // Kiểm tra reservation có tồn tại và hợp lệ không
         if (
             $reservation &&
-            $reservation->status === 'confirmed' &&
-            $reservation->start_time &&
-            $reservation->expires_at &&
-            $now->between($reservation->start_time, $reservation->expires_at)
+            $reservation->status === 'confirmed'
         ) {
             return 'hold';
         }

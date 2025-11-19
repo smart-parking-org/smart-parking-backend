@@ -24,6 +24,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->call(function () {
             app(\App\Http\Controllers\ReservationController::class)->expireDue();
         })->everyMinute();
+        $schedule->call(function () {
+            app(\App\Http\Controllers\MonthlyPassController::class)->expireDue();
+        })->everyMinute();
         $schedule->command('app:send-reservation-hold-notification')->everyMinute();
     })
     ->withExceptions(function (Exceptions $exceptions): void {

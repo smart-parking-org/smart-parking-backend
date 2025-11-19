@@ -28,6 +28,7 @@ class Payment extends Model
 {
     protected $fillable = [
         'order_id',
+        'reservation_id', // ✅ Thêm dòng này
         'amount',
         'txn_ref',
         'status',
@@ -35,11 +36,19 @@ class Payment extends Model
         'vnp_transaction_no',
         'bank_code',
         'card_type',
-        'meta'
+        'meta',
+        'reservation_id'
     ];
 
     protected $casts = [
         'amount' => 'integer',
+        'reservation_id' => 'integer', // ✅ Thêm cast
         'meta' => 'array',
     ];
+
+    // ✅ Thêm relationship
+    public function reservation()
+    {
+        return $this->belongsTo(Reservation::class);
+    }
 }

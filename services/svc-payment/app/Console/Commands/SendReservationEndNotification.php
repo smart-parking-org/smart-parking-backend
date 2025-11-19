@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Notification;
 use App\Models\Reservation;
 use App\Services\AuthService;
 use App\Traits\PushNotification;
@@ -44,6 +45,15 @@ class SendReservationEndNotification extends Command
                 'Còn 10 phút nữa phiên giữ xe của bạn sẽ kết thúc.',
                 ['type' => 'reservation_end', 'reservation_id' => (string) $res->id]
             );
+
+            Notification::create([
+                'user_id' => $res->user_id,
+                'reservation_id' => $res->id ?? null,
+                'type' => 'parking_time_expiring',
+                'title' => 'Giữ chỗ sắp hết',
+                'body' => 'Còn 10 phút nữa phiên giữ xe của bạn sẽ kết thúc.',
+                'is_read' => false,
+            ]);
         }
         return self::SUCCESS;
     }

@@ -9,22 +9,38 @@ use Illuminate\Support\Facades\Log;
 
 trait PushNotification
 {
-    public function sendNotification($token, $title, $body, $data = [])
-    {
+    public function sendNotification(
+        $token,
+        $title,
+        $body,
+        array $data = [],
+    ) {
         $fcmurl = config('services.firebase.fcm_url');
-        $stringData = [];
-        foreach ($data as $key => $value) {
-            $stringData[$key] = is_string($value) ? $value : json_encode($value);
-        }
+
 
         $notification = [
             'notification' => [
                 'title' => $title,
                 'body' => $body
             ],
-            'data' => $stringData,
             'token' => $token
         ];
+
+        if (!empty($data)) {
+            $notification['data'] = collect($data)
+                ->map(function ($value) {
+                    if (is_bool($value)) {
+                        return $value ? 'true' : 'false';
+                    }
+
+                    if (is_scalar($value)) {
+                        return (string)$value;
+                    }
+
+                    return json_encode($value);
+                })
+                ->toArray();
+        }
 
         try {
             $accessToken = $this->getAccessToken();
@@ -32,7 +48,6 @@ trait PushNotification
                 'Authorization' => "Bearer $accessToken",
                 'Content-Type' => 'application/json'
             ])->post($fcmurl, ['message' => $notification]);
-            Log::info(">>> check res: $res");
             return $res->json();
         } catch (Exception $e) {
             Log::error("Error sending push notification to $token: {$e->getMessage()}");

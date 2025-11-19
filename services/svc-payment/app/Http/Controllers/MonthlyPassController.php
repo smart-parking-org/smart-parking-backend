@@ -66,7 +66,7 @@ class MonthlyPassController extends Controller
             'bank_code' => 'nullable|string',
         ]);
 
-        $months = (int)($data['months'] ?? 1);
+        $months = (int) ($data['months'] ?? 1);
 
         // Validate user + vehicle từ svc-auth
         $user = $this->authService->getUserSnapshot($data['user_id']);
@@ -79,6 +79,47 @@ class MonthlyPassController extends Controller
             return response()->json(['message' => 'Vehicle không tồn tại hoặc không active'], 422);
         }
 
+        // ✅ Kiểm tra đã có vé tháng ACTIVE cho phương tiện này ở bãi đỗ này chưa
+        $checkDate = $data['start_date'] ? $data['start_date'] : now()->toDateString();
+        $existingActivePass = MonthlyPass::where('user_id', $data['user_id'])
+            ->where('vehicle_id', $data['vehicle_id'])
+            ->where('parking_lot_id', $data['parking_lot_id'])
+            ->where('status', 'ACTIVE')
+            ->where(function ($query) use ($checkDate) {
+                // Kiểm tra vé tháng còn hiệu lực (trong khoảng start_date -> end_date)
+                $query->where(function ($q) use ($checkDate) {
+                    $q->whereNull('start_date')
+                        ->orWhere('start_date', '<=', $checkDate);
+                })
+                    ->where(function ($q) use ($checkDate) {
+                    $q->whereNull('end_date')
+                        ->orWhere('end_date', '>=', $checkDate);
+                });
+            })
+            ->first();
+
+        if ($existingActivePass) {
+            $endDate = $existingActivePass->end_date
+                ? $existingActivePass->end_date->format('d/m/Y')
+                : 'chưa xác định';
+            return response()->json([
+                'message' => "Bạn đã có vé tháng đang hoạt động cho phương tiện này ở bãi đỗ này. Vé tháng hiện tại có hiệu lực đến ngày {$endDate}. Vui lòng đợi vé tháng hết hạn hoặc hủy vé tháng cũ trước khi đăng ký mới."
+            ], 422);
+        }
+
+        // ✅ Kiểm tra vé tháng PENDING (đang chờ thanh toán)
+        $existingPendingPass = MonthlyPass::where('user_id', $data['user_id'])
+            ->where('vehicle_id', $data['vehicle_id'])
+            ->where('parking_lot_id', $data['parking_lot_id'])
+            ->where('status', 'PENDING')
+            ->first();
+
+        if ($existingPendingPass) {
+            return response()->json([
+                'message' => "Bạn đã có vé tháng đang chờ thanh toán cho phương tiện này ở bãi đỗ này. Vui lòng hoàn tất thanh toán hoặc hủy vé tháng đang chờ trước khi đăng ký mới."
+            ], 422);
+        }
+
         // Lấy giá monthly_pass từ PricingRule theo bãi + loại xe
         $rule = PricingRule::where('parking_lot_id', $data['parking_lot_id'])
             ->where('vehicle_type', $vehicle['vehicle_type'])
@@ -88,7 +129,7 @@ class MonthlyPassController extends Controller
             return response()->json(['message' => 'Bãi/loại xe chưa có giá vé tháng'], 422);
         }
 
-        $amount = (int)round($rule->monthly_pass * $months);
+        $amount = (int) round($rule->monthly_pass * $months);
 
         $orderId = 'MP-' . now()->format('YmdHis') . '-' . rand(10000, 99999);
         $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
@@ -348,6 +389,158 @@ class MonthlyPassController extends Controller
         }
 
         return response()->json(['data' => $pass]);
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/monthly-passes/{id}/create-payment",
+     *     tags={"🎫 Monthly Passes"},
+     *     summary="Tạo URL thanh toán cho vé tháng PENDING",
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         @OA\Schema(type="integer", example=1)
+     *     ),
+     *     @OA\RequestBody(
+     *         required=false,
+     *         @OA\JsonContent(
+     *             @OA\Property(property="bank_code", type="string", nullable=true, example="NCB")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Tạo URL thanh toán thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="payUrl", type="string"),
+     *             @OA\Property(property="txnRef", type="string"),
+     *             @OA\Property(property="payment_id", type="integer"),
+     *             @OA\Property(property="amount", type="integer", example=1800000)
+     *         )
+     *     ),
+     *     @OA\Response(response=404, description="Không tìm thấy vé tháng"),
+     *     @OA\Response(response=422, description="Vé tháng không ở trạng thái PENDING")
+     * )
+     */
+    public function createPayment(Request $r, $id)
+    {
+        $pass = MonthlyPass::find($id);
+        if (!$pass) {
+            return response()->json(['message' => 'Vé tháng không tồn tại'], 404);
+        }
+
+        // Chỉ cho phép thanh toán khi status = PENDING
+        if ($pass->status !== 'PENDING') {
+            return response()->json([
+                'message' => 'Chỉ có thể thanh toán vé tháng đang ở trạng thái PENDING'
+            ], 422);
+        }
+
+        // Tìm payment PENDING của monthly pass này
+        $existingPayment = Payment::where('order_id', $pass->order_id)
+            ->where('status', 'PENDING')
+            ->first();
+
+        if ($existingPayment) {
+            // Sử dụng payment đã tồn tại, tạo URL mới
+            $url = $this->vnpayService->createPaymentUrl([
+                'order_id' => $pass->order_id,
+                'amount' => $pass->amount,
+                'txn_ref' => $pass->txn_ref,
+                'bank_code' => $r->input('bank_code'),
+            ]);
+
+            return response()->json([
+                'payUrl' => $url,
+                'txnRef' => $pass->txn_ref,
+                'payment_id' => $existingPayment->id,
+                'amount' => $pass->amount,
+                'message' => 'Sử dụng payment đã tồn tại'
+            ]);
+        }
+
+        // Nếu chưa có payment PENDING, tạo payment mới
+        $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
+
+        // Cập nhật txn_ref của monthly pass nếu chưa có
+        if (!$pass->txn_ref) {
+            $pass->update(['txn_ref' => $txnRef]);
+        } else {
+            $txnRef = $pass->txn_ref;
+        }
+
+        $payment = Payment::create([
+            'order_id' => $pass->order_id,
+            'amount' => $pass->amount,
+            'txn_ref' => $txnRef,
+            'status' => 'PENDING',
+            'meta' => [
+                'type' => 'monthly_pass',
+                'monthly_pass_id' => $pass->id, // ✅ Đảm bảo luôn có monthly_pass_id
+                'user_id' => $pass->user_id,
+                'vehicle_id' => $pass->vehicle_id,
+                'parking_lot_id' => $pass->parking_lot_id,
+            ],
+        ]);
+
+        $url = $this->vnpayService->createPaymentUrl([
+            'order_id' => $pass->order_id,
+            'amount' => $pass->amount,
+            'txn_ref' => $txnRef,
+            'bank_code' => $r->input('bank_code'),
+        ]);
+
+        return response()->json([
+            'payUrl' => $url,
+            'txnRef' => $txnRef,
+            'payment_id' => $payment->id,
+            'amount' => $pass->amount,
+        ]);
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/monthly-passes/expire-due",
+     *     tags={"🎫 Monthly Passes"},
+     *     summary="Tự động hết hạn vé tháng quá hạn",
+     *     description="Hết hạn tất cả vé tháng đã quá end_date. Chạy tự động bằng schedule.",
+     *     @OA\Response(
+     *         response=200,
+     *         description="Hết hạn thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string", example="Đã hết hạn 5 vé tháng"),
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="object",
+     *                 @OA\Property(property="expired_count", type="integer", example=5)
+     *             )
+     *         )
+     *     )
+     * )
+     */
+    public function expireDue()
+    {
+        $expiredPasses = MonthlyPass::where('status', 'ACTIVE')
+            ->whereNotNull('end_date')
+            ->where('end_date', '<', now()->toDateString())
+            ->get();
+
+        $expiredCount = 0;
+
+        foreach ($expiredPasses as $pass) {
+            $pass->update([
+                'status' => 'EXPIRED'
+            ]);
+
+            $expiredCount++;
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => "Đã hết hạn {$expiredCount} vé tháng",
+            'data' => ['expired_count' => $expiredCount]
+        ]);
     }
 }
 

@@ -2,17 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CheckoutCode;
 use App\Models\MonthlyPass;
 use App\Models\Payment;
 use App\Models\Violation;
+use App\Models\Reservation;
+use App\Services\ParkingFeeService;
 use App\Services\VnpayService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use OpenApi\Annotations as OA; // <-- Quan trọng cho swagger-php
 
 /**
- * @OA\Tag(name="Payments", description="Payment operations via VNPAY")
+ * @OA\Tag(name="💳 Payments", description="Payment operations via VNPAY")
  */
 class PaymentController extends Controller
 {
@@ -25,13 +29,14 @@ class PaymentController extends Controller
      *   path="/payments/create",
      *   operationId="PaymentsCreate",
      *   tags={"Payments"},
-     *   summary="Tạo URL thanh toán VNPAY",
+     *   summary="Tạo URL thanh toán VNPAY cho reservation",
      *   @OA\RequestBody(
      *     required=true,
      *     @OA\JsonContent(
      *       required={"order_id","amount"},
      *       @OA\Property(property="order_id", type="string", example="INV-10001"),
      *       @OA\Property(property="amount", type="integer", example=50000, minimum=1000),
+     *       @OA\Property(property="reservation_id", type="integer", nullable=true, example=123, description="ID của reservation (cho thanh toán checkout)"),
      *       @OA\Property(property="bank_code", type="string", nullable=true, example="NCB")
      *     )
      *   ),
@@ -40,10 +45,13 @@ class PaymentController extends Controller
      *     description="Sinh link thanh toán thành công",
      *     @OA\JsonContent(
      *       @OA\Property(property="payUrl", type="string"),
-     *       @OA\Property(property="txnRef", type="string")
+     *       @OA\Property(property="txnRef", type="string"),
+     *       @OA\Property(property="payment_id", type="integer"),
+     *       @OA\Property(property="amount", type="integer", example=50000)
      *     )
      *   ),
-     *   @OA\Response(response=422, description="Validation error")
+     *   @OA\Response(response=404, description="Reservation not found"),
+     *   @OA\Response(response=422, description="Validation error hoặc reservation chưa check-in")
      * )
      */
     public function create(Request $r)
@@ -51,15 +59,131 @@ class PaymentController extends Controller
         $r->validate([
             'order_id' => 'required',
             'amount' => 'required|integer|min:1000',
+            'reservation_id' => 'nullable|integer|exists:reservations,id', // ✅ Thêm validation
         ]);
 
+        $reservation = Reservation::with('slot')->find($r->reservation_id);
+
+        if (!$reservation) {
+            return response()->json(['message' => 'Reservation not found'], 404);
+        }
+
+        // Chỉ cho phép thanh toán khi đã check-in
+        if (!$reservation->check_in_at) {
+            return response()->json([
+                'message' => 'Reservation chưa check-in, không thể thanh toán'
+            ], 422);
+        }
+
+        // Kiểm tra xem đã có payment PENDING cho reservation này chưa
+        $existingPayment = Payment::where('reservation_id', $r->reservation_id)
+            ->where('status', 'PENDING')
+            ->first();
+
+        // ✅ Kiểm tra nếu đã có payment PAID
+        $paidPayment = Payment::where('reservation_id', $r->reservation_id)
+            ->where('status', 'PAID')
+            ->first();
+
+        if ($paidPayment) {
+            return response()->json([
+                'message' => 'Reservation này đã thanh toán thành công. Không thể tạo payment mới.',
+                'payment_id' => $paidPayment->id,
+                'status' => $paidPayment->status,
+            ], 422);
+        }
+
+        if ($existingPayment) {
+            // Tính lại phí (có thể thay đổi nếu thời gian đã tăng)
+            $parkingLotId = $reservation->slot->parking_lot_id;
+            $vehicleType = $reservation->vehicle_snapshot['vehicle_type'] ?? 'motorbike';
+            $checkOutAt = $reservation->check_out_at ?? now();
+
+            $feeService = app(ParkingFeeService::class);
+            // $newAmount = $feeService->calculateFee(
+            //     $reservation->check_in_at,
+            //     $checkOutAt,
+            //     $parkingLotId,
+            //     $vehicleType
+            // );
+            $newAmount = 15000;
+
+            // Cập nhật amount nếu khác
+            if ($existingPayment->amount !== $newAmount) {
+                $existingPayment->update(['amount' => $newAmount]);
+            }
+
+            // Cập nhật meta với thời gian mới nhất
+            $existingMeta = is_array($existingPayment->meta) ? $existingPayment->meta : [];
+            $existingPayment->update([
+                'meta' => array_merge($existingMeta, [
+                    'type' => 'parking_fee',
+                    'reservation_id' => $reservation->id,
+                    'check_in_at' => $reservation->check_in_at->toIso8601String(),
+                    'check_out_at' => $checkOutAt->toIso8601String(),
+                ]),
+            ]);
+            $orderId = $reservation->reservation_code;
+
+            // Tạo URL thanh toán với payment đã tồn tại
+            $url = $this->vnp->createPaymentUrl([
+                'order_id' => $orderId,
+                'amount' => $existingPayment->amount,
+                'txn_ref' => $existingPayment->txn_ref,
+                'bank_code' => $r->bank_code,
+            ]);
+
+            return response()->json([
+                'payUrl' => $url,
+                'txnRef' => $existingPayment->txn_ref,
+                'payment_id' => $existingPayment->id,
+                'amount' => $existingPayment->amount,
+                'message' => 'Sử dụng payment đã tồn tại'
+            ]);
+        }
+
+        // ✅ Kiểm tra nếu có payment FAILED, tạo txn_ref mới
+        $failedPayment = Payment::where('reservation_id', $r->reservation_id)
+            ->where('status', 'FAILED')
+            ->latest()
+            ->first();
+
+        // Nếu chưa có payment PENDING, tính phí và tạo mới
+        $parkingLotId = $reservation->slot->parking_lot_id;
+        $vehicleType = $reservation->vehicle_snapshot['vehicle_type'] ?? 'motorbike';
+        $checkOutAt = $reservation->check_out_at ?? now();
+
+        $feeService = app(ParkingFeeService::class);
+        // $amount = $feeService->calculateFee(
+        //     $reservation->check_in_at,
+        //     $checkOutAt,
+        //     $parkingLotId,
+        //     $vehicleType
+        // );
+        $amount = 15000;
+
+        $orderId = $reservation->reservation_code;
+
+        // ✅ Tạo txn_ref mới, đảm bảo unique
         $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
+        // Kiểm tra txn_ref đã tồn tại chưa (rất hiếm nhưng để an toàn)
+        while (Payment::where('txn_ref', $txnRef)->exists()) {
+            $txnRef = 'ORD' . now()->format('YmdHis') . rand(100, 999);
+        }
 
         $p = Payment::create([
             'order_id' => $r->order_id,
-            'amount' => $r->amount,
+            'reservation_id' => $r->reservation_id,
+            'amount' => $amount,
             'txn_ref' => $txnRef,
             'status' => 'PENDING',
+            'meta' => [
+                'type' => 'parking_fee',
+                'payment_method' => 'online',
+                'reservation_id' => $reservation->id,
+                'check_in_at' => $reservation->check_in_at->toIso8601String(),
+                'check_out_at' => $checkOutAt->toIso8601String(),
+            ],
         ]);
 
         $url = $this->vnp->createPaymentUrl([
@@ -69,7 +193,12 @@ class PaymentController extends Controller
             'bank_code' => $r->bank_code,
         ]);
 
-        return response()->json(['payUrl' => $url, 'txnRef' => $txnRef]);
+        return response()->json([
+            'payUrl' => $url,
+            'txnRef' => $txnRef,
+            'payment_id' => $p->id,
+            'amount' => $amount
+        ]);
     }
 
     /**
@@ -135,30 +264,45 @@ class PaymentController extends Controller
         Log::info('VNPAY RETURN', $params);
 
         if (!$this->vnp->verify($params)) {
-            return response()->json(['message' => 'Invalid checksum'], 400);
+            return view('payment.error', [
+                'title' => 'Lỗi',
+                'message' => 'Chữ ký không hợp lệ',
+                'icon' => '❌',
+                'color' => '#ef4444'
+            ])->header('Content-Type', 'text/html; charset=utf-8');
         }
 
         $payment = Payment::where('txn_ref', $params['vnp_TxnRef'] ?? '')->first();
         if (!$payment) {
-            return response()->json(['message' => 'Order not found'], 404);
+            return view('payment.error', [
+                'title' => 'Lỗi',
+                'message' => 'Không tìm thấy đơn hàng',
+                'icon' => '❌',
+                'color' => '#ef4444'
+            ])->header('Content-Type', 'text/html; charset=utf-8');
         }
 
         $amountVnp = (int) ($params['vnp_Amount'] ?? 0) / 100;
         if ($amountVnp !== (int) $payment->amount) {
-            return response()->json(['message' => 'Amount mismatch'], 400);
+            return view('payment.error', [
+                'title' => 'Lỗi',
+                'message' => 'Số tiền không khớp',
+                'icon' => '❌',
+                'color' => '#ef4444'
+            ])->header('Content-Type', 'text/html; charset=utf-8');
         }
 
         $wasPaid = false;
         if ($payment->status === 'PENDING') {
             $newStatus = ($params['vnp_ResponseCode'] === '00') ? 'PAID' : 'FAILED';
             $wasPaid = ($newStatus === 'PAID');
-            
-            // Giữ nguyên meta cũ và merge thêm thông tin từ VNPay
+
+            // Giữ nguyên và merge thêm thông tin từ VNPay
             $existingMeta = is_array($payment->meta) ? $payment->meta : [];
             $mergedMeta = array_merge($existingMeta, [
                 'vnp_return' => $params,
             ]);
-            
+
             $payment->update([
                 'status' => $newStatus,
                 'vnp_response_code' => $params['vnp_ResponseCode'] ?? null,
@@ -171,7 +315,7 @@ class PaymentController extends Controller
 
         // Xử lý các loại payment sau khi thanh toán thành công
         if ($wasPaid) {
-            // Reload payment để lấy meta đã được update
+            // Reload payment 
             $payment->refresh();
             if ($payment->meta && isset($payment->meta['type'])) {
                 if ($payment->meta['type'] === 'monthly_pass') {
@@ -180,16 +324,55 @@ class PaymentController extends Controller
                     $this->resolveViolation($payment);
                 }
             }
+
+            // ✅ Chuyển reservation từ pending_payment → pending_checkout nếu có reservation
+            if ($payment->reservation_id) {
+                $reservation = Reservation::find($payment->reservation_id);
+                if ($reservation && $reservation->status === 'pending_payment') {
+                    $reservation->update(['status' => 'pending_checkout']);
+                }
+            }
+
+            // Mobile app sẽ nhận deep link với status=PAID để biết thanh toán thành công
         }
 
-        return response()->json([
-            'status' => $payment->status,
-            'order_id' => $payment->order_id,
-            'txn_ref' => $payment->txn_ref,
-            'message' => $payment->status === 'PAID' ? 'Thanh toán thành công' : 'Thanh toán không thành công',
+        // ✅ Chuẩn bị data cho view
+        $status = $payment->status;
+        $isSuccess = $status === 'PAID';
+
+        $title = $isSuccess ? 'Thanh toán thành công!' : 'Thanh toán thất bại';
+        $message = $isSuccess
+            ? 'Cảm ơn bạn đã thanh toán. Vui lòng quay lại app để hoàn tất.'
+            : 'Thanh toán không thành công. Vui lòng thử lại hoặc chọn phương thức thanh toán khác.';
+        $icon = $isSuccess ? '✅' : '❌';
+        $color = $isSuccess ? '#10b981' : '#ef4444';
+
+        // Tạo deep link
+        $deepLink = "smartparking://payment/result?status={$status}&txn_ref={$payment->txn_ref}&order_id={$payment->order_id}&reservation_id={$payment->reservation_id}";
+
+        // ✅ Thêm monthly_pass_id vào deep link nếu có
+        if ($payment->meta && isset($payment->meta['monthly_pass_id'])) {
+            $deepLink .= "&monthly_pass_id=" . $payment->meta['monthly_pass_id'];
+        } else {
+            // ✅ Fallback: Nếu order_id bắt đầu bằng "MP-", tìm monthly pass theo order_id
+            if (str_starts_with($payment->order_id, 'MP-')) {
+                $monthlyPass = MonthlyPass::where('order_id', $payment->order_id)->first();
+                if ($monthlyPass) {
+                    $deepLink .= "&monthly_pass_id=" . $monthlyPass->id;
+                }
+            }
+        }
+
+        // ✅ Return view với data
+        return view('payment.return', [
+            'title' => $title,
+            'message' => $message,
+            'icon' => $icon,
+            'color' => $color,
+            'deepLink' => $deepLink,
+            'payment' => $payment,
         ]);
     }
-
     /**
      * @OA\Post(
      *   path="/payments/ipn",
@@ -221,7 +404,7 @@ class PaymentController extends Controller
      *   )
      * )
      *
-     * @OA@Get(
+     * @OA\Get(
      *   path="/payments/ipn",
      *   operationId="PaymentsIpnGET",
      *   tags={"Payments"},
@@ -285,6 +468,8 @@ class PaymentController extends Controller
         if ($wasPaid) {
             // Reload payment để lấy meta đã được update
             $payment->refresh();
+
+            // Xử lý monthly pass hoặc violation fine
             if ($payment->meta && isset($payment->meta['type'])) {
                 if ($payment->meta['type'] === 'monthly_pass') {
                     $this->activateMonthlyPass($payment);
@@ -292,9 +477,144 @@ class PaymentController extends Controller
                     $this->resolveViolation($payment);
                 }
             }
+
+            // ✅ Chuyển reservation từ pending_payment → pending_checkout nếu có reservation
+            if ($payment->reservation_id) {
+                $reservation = Reservation::find($payment->reservation_id);
+                if ($reservation && $reservation->status === 'pending_payment') {
+                    $reservation->update(['status' => 'pending_checkout']);
+                }
+            }
+
+            // Mobile app sẽ nhận IPN callback với status=PAID để biết thanh toán thành công
         }
 
         return response()->json(['RspCode' => '00', 'Message' => 'Confirm Success']);
+    }
+
+    public function getByOrder($orderId)
+    {
+        $payment = Payment::where('order_id', $orderId)
+            ->orderBy('created_at', 'desc')
+            ->first();
+
+        if (!$payment) {
+            return response()->json(['message' => 'Payment not found'], 404);
+        }
+
+        return response()->json($payment);
+    }
+
+    /**
+     * @OA\Put(
+     *   path="/payments/{id}/confirm-offline",
+     *   operationId="ConfirmOfflinePayment",
+     *   tags={"💳 Payments"},
+     *   summary="Xác nhận thanh toán trực tiếp (offline)",
+     *   description="Nhân viên xác nhận thanh toán trực tiếp đã được thực hiện. Chỉ áp dụng cho payment có payment_method = 'offline' và status = 'PENDING'.",
+     *   @OA\Parameter(
+     *     name="id",
+     *     in="path",
+     *     required=true,
+     *     description="ID của payment",
+     *     @OA\Schema(type="integer")
+     *   ),
+     *   @OA\Response(
+     *     response=200,
+     *     description="Xác nhận thanh toán thành công",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="success", type="boolean", example=true),
+     *       @OA\Property(property="message", type="string", example="Xác nhận thanh toán trực tiếp thành công"),
+     *       @OA\Property(
+     *         property="data",
+     *         type="object",
+     *         @OA\Property(property="payment", type="object",
+     *           @OA\Property(property="id", type="integer", example=123),
+     *           @OA\Property(property="order_id", type="string", example="RES-AB12CD34-20251019"),
+     *           @OA\Property(property="amount", type="integer", example=50000),
+     *           @OA\Property(property="status", type="string", enum={"PENDING","PAID","FAILED"}, example="PAID"),
+     *           @OA\Property(property="reservation_id", type="integer", example=456)
+     *         )
+     *       )
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=404,
+     *     description="Không tìm thấy payment",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="success", type="boolean", example=false),
+     *       @OA\Property(property="message", type="string", example="Payment not found")
+     *     )
+     *   ),
+     *   @OA\Response(
+     *     response=422,
+     *     description="Không thể xác nhận thanh toán",
+     *     @OA\JsonContent(
+     *       @OA\Property(property="success", type="boolean", example=false),
+     *       @OA\Property(property="message", type="string", example="Chỉ có thể xác nhận thanh toán trực tiếp với status PENDING")
+     *     )
+     *   )
+     * )
+     */
+    public function confirmOfflinePayment($id)
+    {
+        $payment = Payment::find($id);
+
+        if (!$payment) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Payment not found'
+            ], 404);
+        }
+
+        // Kiểm tra payment method phải là offline
+        $paymentMethod = $payment->meta['payment_method'] ?? null;
+        if ($paymentMethod !== 'offline') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chỉ có thể xác nhận thanh toán trực tiếp (offline). Payment này không phải offline payment.'
+            ], 422);
+        }
+
+        // Kiểm tra status phải là PENDING
+        if ($payment->status !== 'PENDING') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chỉ có thể xác nhận thanh toán với status PENDING. Payment hiện tại có status: ' . $payment->status
+            ], 422);
+        }
+
+        // Cập nhật payment status thành PAID
+        $payment->update([
+            'status' => 'PAID',
+        ]);
+
+        // Reload payment để lấy meta đã được update
+        $payment->refresh();
+
+        // Xử lý các loại payment sau khi thanh toán thành công
+        if ($payment->meta && isset($payment->meta['type'])) {
+            if ($payment->meta['type'] === 'monthly_pass') {
+                $this->activateMonthlyPass($payment);
+            } elseif ($payment->meta['type'] === 'violation_fine') {
+                $this->resolveViolation($payment);
+            }
+        }
+
+        Log::info('Offline payment confirmed', [
+            'payment_id' => $payment->id,
+            'order_id' => $payment->order_id,
+            'amount' => $payment->amount,
+            'reservation_id' => $payment->reservation_id,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Xác nhận thanh toán trực tiếp thành công',
+            'data' => [
+                'payment' => $payment,
+            ]
+        ]);
     }
 
     /**
@@ -406,5 +726,30 @@ class PaymentController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
         }
+    }
+
+    /**
+     * Tạo QR checkout code sau khi thanh toán thành công
+     */
+    private function createCheckoutCode(\App\Models\Reservation $reservation, Payment $payment): CheckoutCode
+    {
+        // Tạo mã checkout code duy nhất
+        $checkoutCode = 'CHK-' . strtoupper(Str::random(8)) . '-' . now()->format('Ymd');
+
+        // Kiểm tra mã đã tồn tại chưa (rất hiếm nhưng để an toàn)
+        while (CheckoutCode::where('checkout_code', $checkoutCode)->exists()) {
+            $checkoutCode = 'CHK-' . strtoupper(Str::random(8)) . '-' . now()->format('Ymd');
+        }
+
+        // Tạo checkout code với thời gian hết hạn 24 giờ
+        $checkoutCodeModel = CheckoutCode::create([
+            'reservation_id' => $reservation->id,
+            'payment_id' => $payment->id,
+            'checkout_code' => $checkoutCode,
+            'status' => 'active',
+            'expires_at' => now()->addHours(24),
+        ]);
+
+        return $checkoutCodeModel;
     }
 }
