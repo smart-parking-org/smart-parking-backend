@@ -96,10 +96,15 @@ class PriorityQueueSlotAllocationService
                 'processed_at' => now()
             ]);
 
+            // Lấy khoảng cách từ slot_gate_distances hoặc distance_from_gate
+            $minDistance = DB::table('slot_gate_distances')
+                ->where('slot_id', $bestSlot->id)
+                ->min('distance') ?? $bestSlot->distance_from_gate;
+
             Log::info("✅ Allocated slot successfully", [
                 'request_id' => $request->id,
                 'slot_code' => $bestSlot->slot_code,
-                'distance' => $bestSlot->distance_from_gate . 'm',
+                'distance' => ($minDistance ?? $bestSlot->distance_from_gate) . 'm',
                 'time_range' => $parkingStart->format('Y-m-d H:i') . ' - ' . $parkingEnd->format('H:i'),
                 'processing_ms' => round($processingTime, 2)
             ]);
@@ -145,6 +150,7 @@ class PriorityQueueSlotAllocationService
             $parkingEnd = $parkingEnd->copy()->utc();
 
             // Tìm slot: cùng loại xe, không có reservation overlap, gần cổng nhất
+            // Sử dụng khoảng cách từ slot_gate_distances (khoảng cách nhỏ nhất đến bất kỳ cổng nào)
             $slot = ParkingSlot::where('parking_lot_id', $parkingLotId)
                 ->where('vehicle_type', $vehicleType)
                 ->whereDoesntHave('reservations', function ($q) use ($parkingStart, $parkingEnd) {
@@ -156,7 +162,10 @@ class PriorityQueueSlotAllocationService
                             ->where('start_time', '<', $parkingEnd);
                     });
                 })
-                ->orderBy('distance_from_gate', 'asc')  // Ưu tiên slot gần cổng nhất
+                ->leftJoin('slot_gate_distances', 'parking_slots.id', '=', 'slot_gate_distances.slot_id')
+                ->select('parking_slots.*', DB::raw('COALESCE(MIN(slot_gate_distances.distance), parking_slots.distance_from_gate) as min_gate_distance'))
+                ->groupBy('parking_slots.id')
+                ->orderBy('min_gate_distance', 'asc')  // Ưu tiên slot gần cổng nhất
                 ->lockForUpdate() // Lock để tránh 2 requests cùng lấy 1 slot
                 ->first();
 
