@@ -87,6 +87,7 @@ Route::prefix('extension-policies')->group(function () {
     Route::get('/parking-lot/{parkingLotId}', [ExtensionPolicyController::class, 'getByParkingLot']);
 });
 
+Route::post('/send-notification', [NotificationController::class, 'sendPushNotification']);
 // Monthly Passes
 Route::prefix('monthly-passes')->group(function () {
     Route::post('/', [MonthlyPassController::class, 'store']);           // Tạo vé tháng + URL thanh toán
