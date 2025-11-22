@@ -19,8 +19,6 @@ class Gate extends Model
     ];
 
     protected $casts = [
-        'position_x' => 'decimal:2',
-        'position_y' => 'decimal:2',
         'is_active' => 'boolean',
     ];
 

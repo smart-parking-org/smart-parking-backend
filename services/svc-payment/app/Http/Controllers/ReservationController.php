@@ -122,6 +122,23 @@ class ReservationController extends Controller
      *                             @OA\Property(property="vehicle_type", type="string", example="car_4_seat")
      *                         ),
      *                         @OA\Property(
+     *                             property="reservation_request",
+     *                             type="object",
+     *                             @OA\Property(property="id", type="integer", example=2),
+     *                             @OA\Property(property="gate_id", type="integer", example=1)
+     *                         ),
+     *                         @OA\Property(
+     *                             property="gate",
+     *                             type="object",
+     *                             nullable=true,
+     *                             @OA\Property(property="id", type="integer", example=1),
+     *                             @OA\Property(property="gate_code", type="string", example="GATE-001"),
+     *                             @OA\Property(property="gate_type", type="string", enum={"entrance", "exit", "both"}, example="entrance"),
+     *                             @OA\Property(property="position_x", type="number", format="float", nullable=true),
+     *                             @OA\Property(property="position_y", type="number", format="float", nullable=true),
+     *                             @OA\Property(property="is_active", type="boolean", example=true)
+     *                         ),
+     *                         @OA\Property(
      *                             property="user_snapshot",
      *                             type="object",
      *                             @OA\Property(property="name", type="string", example="Nguyễn Văn A"),
@@ -154,7 +171,7 @@ class ReservationController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Reservation::with(['slot', 'reservationRequest', 'payment']);
+        $query = Reservation::with(['slot', 'reservationRequest.gate', 'payment']);
 
         // Filter theo user_id
         if ($request->filled('user_id')) {
@@ -206,10 +223,23 @@ class ReservationController extends Controller
             'expired' => Reservation::where('status', 'expired')->count(),
         ];
 
+        // Transform reservations để đưa gate ra cùng cấp với reservation_request
+        $transformedReservations = $reservations->getCollection()->map(function ($reservation) {
+            $data = $reservation->toArray();
+            
+            // Tách gate ra khỏi reservation_request và đặt ở cùng cấp
+            if (isset($data['reservation_request']['gate'])) {
+                $data['gate'] = $data['reservation_request']['gate'];
+                unset($data['reservation_request']['gate']);
+            }
+            
+            return $data;
+        });
+
         return response()->json([
             'success' => true,
             'data' => [
-                'reservations' => $reservations->items(),
+                'reservations' => $transformedReservations->values()->all(),
                 'pagination' => [
                     'current_page' => $reservations->currentPage(),
                     'per_page' => $reservations->perPage(),
@@ -236,6 +266,7 @@ class ReservationController extends Controller
      *             @OA\Property(property="vehicle_id", type="integer", example=1),
      *             @OA\Property(property="desired_start_time", type="string", format="date-time", example="2025-10-22T17:12:00.000000Z"),
      *             @OA\Property(property="duration_minutes", type="integer", minimum=30, maximum=1440, example=120),
+     *             @OA\Property(property="gate_id", type="integer", nullable=true, example=1, description="ID cổng vào (tùy chọn, nếu không có sẽ chọn slot gần cổng gần nhất)"),
      *         )
      *     ),
      *     @OA\Response(
@@ -387,6 +418,7 @@ class ReservationController extends Controller
         $duration = (int) $validated['duration_minutes'];
         $userId = (int) $validated['user_id'];
         $vehicleId = (int) $validated['vehicle_id'];
+        $gateId = isset($validated['gate_id']) ? (int) $validated['gate_id'] : null;
         $algorithm = $validated['algorithm'] ?? 'priority_queue';
 
         // Kiểm tra user tồn tại và active
@@ -471,7 +503,7 @@ class ReservationController extends Controller
         $vehicleType = $vehicleData['vehicle_type'];
 
         return DB::transaction(
-            function () use ($parkingLotId, $vehicleType, $desiredStart, $duration, $userId, $vehicleId, $algorithm) {
+            function () use ($parkingLotId, $vehicleType, $desiredStart, $duration, $userId, $vehicleId, $gateId, $algorithm) {
                 // 1. Tạo reservation request
                 $reservationRequest = ReservationRequest::create([
                     'parking_lot_id' => $parkingLotId,
@@ -480,6 +512,7 @@ class ReservationController extends Controller
                     'vehicle_type' => $vehicleType,
                     'desired_start_time' => $desiredStart,
                     'duration_minutes' => $duration,
+                    'gate_id' => $gateId,
                     'status' => 'pending',
                     'requested_at' => now(),
                 ]);
@@ -803,7 +836,19 @@ class ReservationController extends Controller
      *                     @OA\Property(property="duration_minutes", type="integer", example=120),
      *                     @OA\Property(property="status", type="string", example="assigned"),
      *                     @OA\Property(property="priority_score", type="number", example=950.5),
-     *                     @OA\Property(property="processing_time_ms", type="number", example=12.35)
+     *                     @OA\Property(property="processing_time_ms", type="number", example=12.35),
+     *                     @OA\Property(property="gate_id", type="integer", example=1)
+     *                 ),
+     *                 @OA\Property(
+     *                     property="gate",
+     *                     type="object",
+     *                     nullable=true,
+     *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="gate_code", type="string", example="GATE-001"),
+     *                     @OA\Property(property="gate_type", type="string", enum={"entrance", "exit", "both"}, example="entrance"),
+     *                     @OA\Property(property="position_x", type="number", format="float", nullable=true),
+     *                     @OA\Property(property="position_y", type="number", format="float", nullable=true),
+     *                     @OA\Property(property="is_active", type="boolean", example=true)
      *                 ),
      *                 @OA\Property(
      *                     property="user_snapshot",
@@ -839,12 +884,21 @@ class ReservationController extends Controller
      */
     public function show($id)
     {
-        $reservation = Reservation::with(['slot.parkingLot', 'reservationRequest', 'payment'])->findOrFail($id);
+        $reservation = Reservation::with(['slot.parkingLot', 'reservationRequest.gate', 'payment'])->findOrFail($id);
+
+        // Transform để đưa gate ra cùng cấp với reservation_request
+        $data = $reservation->toArray();
+        
+        // Tách gate ra khỏi reservation_request và đặt ở cùng cấp
+        if (isset($data['reservation_request']['gate'])) {
+            $data['gate'] = $data['reservation_request']['gate'];
+            unset($data['reservation_request']['gate']);
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'Check-out thành công',
-            'data' => $reservation
+            'data' => $data
         ]);
     }
 
@@ -1503,8 +1557,19 @@ class ReservationController extends Controller
                 $reservation->slot->update(['status' => 'available']);
             }
 
-            // Finalize request
-            $this->finalizeRequestIfAny($reservation, 'expired');
+            // Finalize request: khi reservation expired, request đã hoàn thành vai trò assign slot
+            // Nếu request status = 'assigned' → set 'completed' (đã hoàn thành)
+            // Nếu request status = 'pending' → set 'failed' (không còn chỗ)
+            if ($reservation->reservation_request_id) {
+                $request = ReservationRequest::find($reservation->reservation_request_id);
+                if ($request) {
+                    if ($request->status === 'assigned') {
+                        $request->update(['status' => 'completed']);
+                    } elseif ($request->status === 'pending') {
+                        $request->update(['status' => 'failed']);
+                    }
+                }
+            }
 
             $expiredCount++;
         }
@@ -1674,7 +1739,7 @@ class ReservationController extends Controller
      */
     public function getUserHistory(Request $request, $userId)
     {
-        $query = Reservation::with(['slot.parkingLot'])
+        $query = Reservation::with(['slot.parkingLot', 'reservationRequest.gate'])
             ->where('user_id', $userId);
 
         // Filter theo status
@@ -1697,8 +1762,8 @@ class ReservationController extends Controller
         $perPage = $request->get('per_page', 15);
         $reservations = $query->paginate($perPage);
 
-        // Lấy thông tin payment cho mỗi reservation
-        $reservations->getCollection()->transform(function ($reservation) {
+        // Lấy thông tin payment cho mỗi reservation và transform để đưa gate ra cùng cấp
+        $transformedReservations = $reservations->getCollection()->map(function ($reservation) {
             // Tìm payment theo order_id (có thể là reservation_code) hoặc trong meta
             $payment = Payment::where('order_id', $reservation->reservation_code)
                 ->orWhere(function ($q) use ($reservation) {
@@ -1710,7 +1775,16 @@ class ReservationController extends Controller
             // Thêm payment vào reservation
             $reservation->payment = $payment;
 
-            return $reservation;
+            // Transform để đưa gate ra cùng cấp với reservation_request
+            $data = $reservation->toArray();
+            
+            // Tách gate ra khỏi reservation_request và đặt ở cùng cấp
+            if (isset($data['reservation_request']['gate'])) {
+                $data['gate'] = $data['reservation_request']['gate'];
+                unset($data['reservation_request']['gate']);
+            }
+            
+            return $data;
         });
 
         // Summary statistics
@@ -1739,7 +1813,7 @@ class ReservationController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'reservations' => $reservations->items(),
+                'reservations' => $transformedReservations->values()->all(),
                 'pagination' => [
                     'current_page' => $reservations->currentPage(),
                     'per_page' => $reservations->perPage(),

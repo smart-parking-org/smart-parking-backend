@@ -11,6 +11,7 @@ class ReservationRequest extends Model
 
     protected $fillable = [
         'parking_lot_id',
+        'gate_id',
         'user_id',
         'vehicle_id',
         'vehicle_type',
@@ -25,6 +26,7 @@ class ReservationRequest extends Model
 
     protected $casts = [
         'parking_lot_id' => 'integer',
+        'gate_id' => 'integer',
         'user_id' => 'integer',
         'vehicle_id' => 'integer',
         'requested_at' => 'datetime',
@@ -33,6 +35,11 @@ class ReservationRequest extends Model
         'desired_start_time' => 'datetime',
         'duration_minutes' => 'integer',
     ];
+
+    public function gate()
+    {
+        return $this->belongsTo(Gate::class);
+    }
 
     public function parkingLot()
     {

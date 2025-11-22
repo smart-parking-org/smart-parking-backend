@@ -18,7 +18,6 @@ return new class extends Migration {
             $table->enum('status', ['available', 'occupied'])->default('available');
             $table->decimal('position_x', 18, 15);
             $table->decimal('position_y', 18, 15);
-            $table->decimal('distance_from_gate', 10, 2);
             $table->timestamps();
         });
     }

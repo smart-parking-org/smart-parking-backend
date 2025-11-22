@@ -1,12 +1,14 @@
 <?php
 
 use App\Http\Controllers\ExtensionPolicyController;
+use App\Http\Controllers\GateController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\MonthlyPassController;
 use App\Http\Controllers\ParkingLotController;
 use App\Http\Controllers\ParkingSlotController;
 use App\Http\Controllers\PeakHourController;
 use App\Http\Controllers\PricingRuleController;
+use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReservationController;
 use App\Http\Controllers\SampleController;
 use App\Http\Controllers\StaffController;
@@ -33,6 +35,7 @@ Route::prefix('parking-lots')->group(function () {
     Route::get('/{id}/slots', [ParkingLotController::class, 'slotMap']);
     Route::get('/{id}/statistics', [ParkingLotController::class, 'statistics']);
     Route::get('/{id}/stream', [ParkingLotController::class, 'stream']);
+    Route::get('/{id}/gates', [GateController::class, 'getByParkingLot']); // Lấy danh sách cổng theo ID bãi đỗ
 });
 
 // Slots
@@ -154,6 +157,11 @@ Route::prefix('notifications')->group(function () {
 
 Route::prefix('staff')->group(function () {
     Route::get('/navigation', [StaffController::class, 'navigation']);
+});
+
+// Reports
+Route::prefix('reports')->group(function () {
+    Route::get('/revenue', [ReportController::class, 'revenue']); // Báo cáo doanh thu, sử dụng và xung đột
 });
 
 // Monthly Passes

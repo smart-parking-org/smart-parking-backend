@@ -25,6 +25,7 @@ class ReservationStoreRequest extends FormRequest
             'vehicle_id' => 'required|integer',
             'desired_start_time' => 'required|date|after_or_equal:now',
             'duration_minutes' => 'required|integer|min:30|max:1440',
+            'gate_id' => 'nullable|integer|exists:gates,id',
         ];
     }
 
@@ -43,6 +44,7 @@ class ReservationStoreRequest extends FormRequest
             'duration_minutes.required' => 'Vui lòng chọn thời lượng đỗ',
             'duration_minutes.min' => 'Thời lượng đỗ tối thiểu 30 phút',
             'duration_minutes.max' => 'Thời lượng đỗ tối đa 24 giờ',
+            'gate_id.exists' => 'Cổng không tồn tại',
         ];
     }
 
@@ -56,6 +58,7 @@ class ReservationStoreRequest extends FormRequest
             'vehicle_type' => 'loại xe',
             'desired_start_time' => 'thời gian bắt đầu',
             'duration_minutes' => 'thời lượng đỗ',
+            'gate_id' => 'cổng',
         ];
     }
 }

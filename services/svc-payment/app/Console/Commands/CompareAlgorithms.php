@@ -2,14 +2,39 @@
 namespace App\Console\Commands;
 
 use App\Models\ReservationRequest;
+use App\Models\ParkingLot;
 use Illuminate\Console\Command;
 
+/**
+ * COMMAND: SO SÁNH 2 THUẬT TOÁN TỰ ĐỘNG
+ *
+ * Mục đích:
+ * - Chạy simulation với cả 2 thuật toán (Priority Queue và Hungarian)
+ * - So sánh kết quả: tỷ lệ xung đột, thời gian xử lý, độ sử dụng chỗ
+ * - Chọn thuật toán tốt nhất theo tiêu chí: xung đột < 2%, thời gian < 1.5s
+ *
+ * ============================================================================
+ * CÁCH SỬ DỤNG - COPY LỆNH SAU:
+ * ============================================================================
+ * 
+ * So sánh tự động 2 thuật toán:
+ * php artisan test:compare-algorithms --requests=300 --peak-ratio=60
+ * 
+ * Lệnh ngắn gọn:
+ * php artisan test:compare-algorithms --requests=300 --peak-ratio=60
+ * 
+ * ============================================================================
+ * GIẢI THÍCH THAM SỐ:
+ * ============================================================================
+ * --requests=300    : Tổng số requests (mặc định: 300)
+ * --peak-ratio=60  : Tỷ lệ giờ cao điểm (mặc định: 60%)
+ */
 class CompareAlgorithms extends Command
 {
     protected $signature = 'test:compare-algorithms
-                            {--requests=300}
-                            {--peak-ratio=60}';
-    protected $description = 'So sánh 2 thuật toán để chọn thuật toán tốt nhất';
+                            {--requests=300 : Tổng số requests}
+                            {--peak-ratio=60 : Tỷ lệ giờ cao điểm (%)}';
+    protected $description = 'So sánh 2 thuật toán (Priority Queue vs Hungarian) để chọn thuật toán tốt nhất';
 
     public function handle()
     {
@@ -38,25 +63,37 @@ class CompareAlgorithms extends Command
 
     private function runAlgorithmTest($algorithm, $totalRequests, $peakRatio)
     {
-        $this->call('test:peak-hour-reservations', [
-            '--requests' => $totalRequests,
+        $this->info("   🔄 Đang chạy simulation với thuật toán {$algorithm}...");
+        
+        // Chạy simulation với thuật toán tương ứng
+        $this->call('simulate:real-time-parking', [
+            '--total-requests' => $totalRequests,
             '--peak-ratio' => $peakRatio,
-            '--algorithm' => $algorithm
+            '--algorithm' => $algorithm,
+            '--initial-occupied' => 200,
+            '--batch-size' => 10,
         ]);
 
-        // Lấy kết quả từ database
-        $requests = ReservationRequest::all();
+        // Lấy kết quả từ database (sau khi simulation chạy xong)
+        $parkingLot = ParkingLot::first();
+        if (!$parkingLot) {
+            $this->error("Không tìm thấy bãi đỗ xe!");
+            return null;
+        }
+        
+        $requests = ReservationRequest::where('parking_lot_id', $parkingLot->id)->get();
+        
         $successCount = $requests->where('status', 'assigned')->count();
         $conflictCount = $requests->where('status', 'failed')->count();
-        $avgProcessingTime = $requests->avg('processing_time_ms') ?? 0;
+        $avgProcessingTime = $requests->whereNotNull('processing_time_ms')->avg('processing_time_ms') ?? 0;
 
         return [
             'algorithm' => $algorithm,
             'total_requests' => $requests->count(),
             'success_count' => $successCount,
             'conflict_count' => $conflictCount,
-            'success_rate' => ($successCount / $requests->count()) * 100,
-            'conflict_rate' => ($conflictCount / $requests->count()) * 100,
+            'success_rate' => $requests->count() > 0 ? ($successCount / $requests->count()) * 100 : 0,
+            'conflict_rate' => $requests->count() > 0 ? ($conflictCount / $requests->count()) * 100 : 0,
             'avg_processing_time' => $avgProcessingTime,
         ];
     }
@@ -127,9 +164,9 @@ class CompareAlgorithms extends Command
 }
 
 
-// # So sánh 2 thuật toán
+// # So sánh 2 thuật toán tự động
 // php artisan test:compare-algorithms --requests=300 --peak-ratio=60
 
 // # Test riêng từng thuật toán
-// php artisan test:peak-hour-reservations --algorithm=priority_queue --requests=300 --peak-ratio=60
-// php artisan test:peak-hour-reservations --algorithm=hungarian --requests=300 --peak-ratio=60
+// php artisan simulate:real-time-parking --algorithm=priority_queue --total-requests=300 --peak-ratio=60
+// php artisan simulate:real-time-parking --algorithm=hungarian --total-requests=300 --peak-ratio=60

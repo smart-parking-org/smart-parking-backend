@@ -4,54 +4,15 @@ namespace App\Services;
 
 use App\Models\Reservation;
 use App\Models\ParkingSlot;
+use App\Models\ReservationRequest;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * ===== MÔ TẢ THUẬT TOÁN =====
+ * Hungarian Algorithm (Kuhn-Munkres) for Batch Slot Allocation
  *
- * ĐẦU VÀO:
- * - Collection<ReservationRequest>: Tập requests cần phân bổ
- *   Mỗi request gồm: parking_lot_id, vehicle_type, desired_start_time, duration_minutes
- *
- * ĐẦU RA:
- * - Array gồm:
- *   + allocations: Danh sách {request_id, slot_id, cost, distance}
- *   + stats: {total, success, failed, avg_processing_time}
- *
- * RÀNG BUỘC:
- * 1. Mỗi request chỉ được gán 1 slot
- * 2. Mỗi slot chỉ được gán cho 1 request trong cùng batch
- * 3. Slot phải cùng vehicle_type với request
- * 4. Slot không được có reservation overlap thời gian
- * 5. Requests được nhóm thành batches theo parking_lot và hour block
- *
- * HÀM MỤC TIÊU:
- * - Minimize tổng cost = Σ(conflict_penalty + wrong_type_penalty + distance_cost)
- *   + Conflict penalty (10000): Nếu slot có reservation overlap
- *   + Wrong type penalty (5000): Nếu loại xe không khớp
- *   + Distance cost (0-1000): Tỷ lệ thuận với khoảng cách từ cổng
- *
- * THUẬT TOÁN:
- * 1. Nhóm requests thành batches (theo parking_lot + hour block)
- * 2. Sort batches theo thời gian (sớm nhất trước)
- * 3. Với mỗi batch:
- *    a. Xây dựng cost matrix M×N (M requests, N slots)
- *    b. Chuẩn hóa matrix (subtract row/column min) - bước chuẩn bị cho Hungarian
- *    c. Greedy matching: Gán request cho slot có cost thấp nhất chưa được gán
- *    d. Double-check conflict trong transaction trước khi commit
- *
- * ĐỘ PHỨC TẠP:
- * - Time Complexity: O(B × (M² × N + M × N × log(M×N))) trong đó:
- *   + B = số batches (thường 10-20 với 300 requests)
- *   + M = số requests mỗi batch (trung bình 15-30)
- *   + N = số slots mỗi batch (trung bình 50-100)
- *   + M² × N = xây dựng cost matrix (kiểm tra conflict cho mỗi cặp request-slot)
- *   + M × N × log(M×N) = sort flatMatrix để greedy matching
- * - Với 300 requests, B=15, M=20, N=75:
- *   => 15 × (20² × 75 + 20 × 75 × log(1500)) ≈ 15 × (30,000 + 100,000) ≈ 2s
- * - Space Complexity: O(M × N) để lưu cost matrix
+ * Triển khai đầy đủ thuật toán Hungarian để tìm minimum cost assignment
  */
 class HungarianSlotAllocationService
 {
@@ -67,7 +28,7 @@ class HungarianSlotAllocationService
         $startTime = microtime(true);
 
         try {
-            // Bước 1: Nhóm requests thành batches theo parking_lot và hour block
+            // Nhóm requests thành batches theo parking_lot và hour block
             $batches = self::groupRequestsIntoBatches($requests);
 
             $allocations = [];
@@ -79,7 +40,7 @@ class HungarianSlotAllocationService
                 'total_processing_time' => 0
             ];
 
-            // Bước 2: Xử lý từng batch tuần tự
+            // Xử lý từng batch tuần tự
             foreach ($batches as $batchKey => $batchRequests) {
                 $batchResult = self::processBatch($batchRequests);
 
@@ -112,17 +73,13 @@ class HungarianSlotAllocationService
     }
 
     /**
-     * Nhóm requests thành batches theo parking_lot và khung giờ (hour block)
-     *
-     * Mỗi batch gồm requests có cùng parking_lot_id và cùng hour block (ví dụ: 07:00-08:00)
-     * Sắp xếp batches theo thời gian để xử lý sớm nhất trước
+     * Nhóm requests thành batches theo parking_lot và khung giờ
      */
     private static function groupRequestsIntoBatches($requests)
     {
         $batches = [];
 
         foreach ($requests as $request) {
-            // Tạo key: parking_lot_id + hour block (mỗi batch 1 giờ)
             $hourBlock = $request->desired_start_time->format('Y-m-d H:00:00');
             $key = $request->parking_lot_id . '_' . $hourBlock;
 
@@ -133,14 +90,14 @@ class HungarianSlotAllocationService
             $batches[$key]->push($request);
         }
 
-        // Sắp xếp requests trong mỗi batch theo desired_start_time (ưu tiên thời gian)
+        // Sắp xếp requests trong mỗi batch theo thời gian
         foreach ($batches as $key => $batch) {
             $batches[$key] = $batch->sortBy(function ($r) {
                 return $r->desired_start_time->timestamp;
             })->values();
         }
 
-        // Sắp xếp batches theo thời gian để xử lý sớm nhất trước
+        // Sắp xếp batches theo thời gian
         uksort($batches, function ($a, $b) use ($batches) {
             $timeA = $batches[$a]->first()->desired_start_time;
             $timeB = $batches[$b]->first()->desired_start_time;
@@ -152,13 +109,6 @@ class HungarianSlotAllocationService
 
     /**
      * Xử lý một batch requests bằng Hungarian Algorithm
-     *
-     * Quy trình:
-     * 1. Lấy tất cả slots phù hợp (cùng parking_lot, cùng vehicle_type)
-     * 2. Xây dựng cost matrix M×N
-     * 3. Chuẩn hóa matrix (subtract row/column min)
-     * 4. Greedy matching để tìm assignment tối ưu
-     * 5. Double-check conflict trong transaction trước khi commit
      */
     private static function processBatch($requests)
     {
@@ -169,19 +119,19 @@ class HungarianSlotAllocationService
 
         return DB::transaction(function () use ($requests, $batchStart, &$allocations, &$success, &$failed) {
             try {
-                // Bước 1: Lấy tất cả slots có thể dùng cho batch này
                 $firstRequest = $requests->first();
                 $vehicleTypesInBatch = $requests->pluck('vehicle_type')->unique();
 
-                // Lấy slots với khoảng cách đến cổng gần nhất
-                $allSlots = ParkingSlot::where('parking_lot_id', $firstRequest->parking_lot_id)
-                    ->whereIn('vehicle_type', $vehicleTypesInBatch)
-                    ->leftJoin('slot_gate_distances', 'parking_slots.id', '=', 'slot_gate_distances.slot_id')
-                    ->select('parking_slots.*', DB::raw('COALESCE(MIN(slot_gate_distances.distance), parking_slots.distance_from_gate) as min_gate_distance'))
-                    ->groupBy('parking_slots.id')
-                    ->orderBy('min_gate_distance', 'asc')
-                    ->lockForUpdate() // LOCK để tránh race condition
-                    ->get();
+                // Lấy tất cả slots cho tất cả vehicle types trong batch
+                $allSlots = collect();
+                foreach ($vehicleTypesInBatch as $vehicleType) {
+                    $slotsForType = ParkingSlot::where('parking_lot_id', $firstRequest->parking_lot_id)
+                        ->where('vehicle_type', $vehicleType)
+                        ->lockForUpdate()
+                        ->get();
+
+                    $allSlots = $allSlots->merge($slotsForType);
+                }
 
                 if ($allSlots->isEmpty()) {
                     foreach ($requests as $request) {
@@ -191,63 +141,72 @@ class HungarianSlotAllocationService
                     return compact('allocations', 'success', 'failed');
                 }
 
-                // Bước 2: Xây dựng cost matrix M×N (M requests, N slots)
+                // Xây dựng cost matrix
                 $costMatrix = self::buildCostMatrix($requests, $allSlots);
+                $originalCostMatrix = $costMatrix; // Lưu cost gốc để kiểm tra sau
 
-                // Bước 3: Chạy Hungarian Algorithm (chuẩn hóa + greedy matching)
-                $assignments = self::hungarianAlgorithm($costMatrix);
+                // Chạy Hungarian Algorithm (Kuhn-Munkres)
+                $assignments = self::hungarianAlgorithm($costMatrix, $originalCostMatrix, count($requests), count($allSlots));
 
-                // Bước 4: Xử lý kết quả assignment
+                // Xử lý kết quả assignment
                 foreach ($assignments as $requestIndex => $slotIndex) {
                     $request = $requests[$requestIndex];
 
                     if ($slotIndex === -1) {
-                        // Không tìm được slot cho request này
                         self::markRequestFailed($request, 'No suitable slot found');
                         $failed++;
                         continue;
                     }
 
                     $slot = $allSlots[$slotIndex];
-                    $cost = $costMatrix[$requestIndex][$slotIndex];
+                    $originalCost = $originalCostMatrix[$requestIndex][$slotIndex];
 
-                    // Nếu cost >= CONFLICT_PENALTY, có nghĩa là có conflict
-                    if ($cost >= self::CONFLICT_PENALTY) {
-                        self::markRequestFailed($request, 'All slots have conflicts');
+                    // Kiểm tra lại: cost phải < WRONG_TYPE_PENALTY (tức là đúng type và không có conflict)
+                    if ($originalCost >= self::WRONG_TYPE_PENALTY) {
+                        self::markRequestFailed($request, 'No suitable slot found (wrong type or conflict)');
                         $failed++;
                         continue;
                     }
 
-                    // Double-check conflict trong transaction (tránh race condition)
-                    $parkingStart = $request->desired_start_time;
+                    // Double-check conflict với DB (tránh race condition)
+                    $parkingStart = $request->desired_start_time->copy()->utc();
                     $parkingEnd = $parkingStart->copy()->addMinutes($request->duration_minutes);
 
                     if (self::hasTimeConflict($slot->id, $parkingStart, $parkingEnd, $request->id)) {
+                        Log::warning("⚠️ Hungarian: Conflict detected during assignment", [
+                            'request_id' => $request->id,
+                            'slot_id' => $slot->id
+                        ]);
                         self::markRequestFailed($request, 'Slot conflict detected during assignment');
                         $failed++;
                         continue;
                     }
 
-                    // Cập nhật request với slot được cấp
-                    $processingTimePerReqquest = ((microtime(true) - $batchStart) * 1000) / max(1, $requests->count());
+                    // Cập nhật request
+                    $processingTimePerRequest = ((microtime(true) - $batchStart) * 1000) / max(1, $requests->count());
                     $request->update([
                         'allocated_slot_id' => $slot->id,
-                        'processing_time_ms' => round($processingTimePerReqquest, 2),
+                        'processing_time_ms' => round($processingTimePerRequest, 2),
                         'algorithm_used' => 'hungarian',
                         'status' => 'assigned',
                         'processed_at' => now()
                     ]);
 
-                    // Lấy khoảng cách từ slot_gate_distances hoặc distance_from_gate
-                    $minDistance = DB::table('slot_gate_distances')
+                    // Lấy khoảng cách
+                    $distance = DB::table('slot_gate_distances')
                         ->where('slot_id', $slot->id)
-                        ->min('distance') ?? $slot->distance_from_gate;
+                        ->min('distance');
+
+                    // Nếu không có dữ liệu distance, sử dụng giá trị mặc định
+                    if ($distance === null) {
+                        $distance = 500; // Khoảng cách trung bình
+                    }
 
                     $allocations[] = [
                         'request_id' => $request->id,
                         'slot_id' => $slot->id,
-                        'cost' => $cost,
-                        'distance' => $minDistance ?? $slot->distance_from_gate
+                        'cost' => $originalCost,
+                        'distance' => $distance
                     ];
 
                     $success++;
@@ -279,31 +238,45 @@ class HungarianSlotAllocationService
         foreach ($requests as $requestIndex => $request) {
             $matrix[$requestIndex] = [];
 
-            $parkingStart = $request->desired_start_time;
+            $parkingStart = $request->desired_start_time->copy()->utc();
             $parkingEnd = $parkingStart->copy()->addMinutes($request->duration_minutes);
 
             foreach ($slots as $slotIndex => $slot) {
                 $cost = 0;
 
-                // 1. Penalty xung đột thời gian (FLAG nhất - 10000)
-                if (self::hasTimeConflict($slot->id, $parkingStart, $parkingEnd, $request->id)) {
+                // 1. Kiểm tra vehicle_type
+                $isWrongType = ($slot->vehicle_type !== $request->vehicle_type);
+                if ($isWrongType) {
+                    $cost += self::WRONG_TYPE_PENALTY;
+                    $matrix[$requestIndex][$slotIndex] = $cost;
+                    continue; // Không cần kiểm tra conflict nếu sai type
+                }
+
+                // 2. Kiểm tra conflict (chỉ nếu đúng type)
+                $hasConflict = self::hasTimeConflict($slot->id, $parkingStart, $parkingEnd, $request->id);
+                if ($hasConflict) {
                     $cost += self::CONFLICT_PENALTY;
                 }
 
-                // 2. Penalty loại xe không khớp (5000)
-                if ($slot->vehicle_type !== $request->vehicle_type) {
-                    $cost += self::WRONG_TYPE_PENALTY;
+                // 3. Chi phí khoảng cách
+                if ($request->gate_id) {
+                    $distance = DB::table('slot_gate_distances')
+                        ->where('slot_id', $slot->id)
+                        ->where('gate_id', $request->gate_id)
+                        ->value('distance');
+                } else {
+                    $distance = DB::table('slot_gate_distances')
+                        ->where('slot_id', $slot->id)
+                        ->min('distance');
                 }
 
-                // 3. Chi phí khoảng cách (0-1000, normalize)
-                // Sử dụng khoảng cách từ slot_gate_distances hoặc distance_from_gate
-                $minDistance = DB::table('slot_gate_distances')
-                    ->where('slot_id', $slot->id)
-                    ->min('distance') ?? $slot->distance_from_gate;
-                
-                // Giả sử khoảng cách tối đa là 500m
+                // Nếu không có dữ liệu distance, sử dụng giá trị mặc định (500m - khoảng cách trung bình)
+                if ($distance === null) {
+                    $distance = 500;
+                }
+
                 $distanceCost = min(
-                    (($minDistance ?? $slot->distance_from_gate) / 500) * self::MAX_DISTANCE_PENALTY,
+                    ($distance / 500) * self::MAX_DISTANCE_PENALTY,
                     self::MAX_DISTANCE_PENALTY
                 );
                 $cost += $distanceCost;
@@ -318,19 +291,19 @@ class HungarianSlotAllocationService
     /**
      * Kiểm tra xung đột thời gian giữa request và slot
      *
-     * Logic overlap: 2 khoảng overlap nếu:
-     * existing.end_time > new.start_time AND existing.start_time < new.end_time
+     * Sử dụng logic giống hệt Priority Queue để đảm bảo nhất quán
      */
     private static function hasTimeConflict($slotId, Carbon $parkingStart, Carbon $parkingEnd, $excludeRequestId = null): bool
     {
-        // Chuyển về UTC để so sánh nhất quán với DB
+        // Đảm bảo đã chuyển về UTC
         $parkingStart = $parkingStart->copy()->utc();
         $parkingEnd = $parkingEnd->copy()->utc();
 
+        // Logic giống Priority Queue: Kiểm tra với reservations đang active
         $query = Reservation::where('slot_id', $slotId)
             ->whereIn('status', ['confirmed', 'checked_in'])
             ->where(function ($q) use ($parkingStart, $parkingEnd) {
-                // Logic overlap: overlap nếu existing.end > new.start AND existing.start < new.end
+                // Logic overlap: existing.end > new.start AND existing.start < new.end
                 $q->where('end_time', '>', $parkingStart)
                     ->where('start_time', '<', $parkingEnd);
             });
@@ -344,27 +317,23 @@ class HungarianSlotAllocationService
     }
 
     /**
-     * Hungarian Algorithm Implementation (simplified version)
+     * Hungarian Algorithm (Kuhn-Munkres) Implementation
      *
-     * Quy trình:
-     * 1. Make square matrix (thêm dummy rows/cols nếu cần)
-     * 2. Subtract row minimum (chuẩn hóa hàng)
-     * 3. Subtract column minimum (chuẩn hóa cột)
-     * 4. Greedy matching để tìm assignment tối ưu
+     * Tìm minimum cost assignment trong bipartite graph
      *
-     * Note: Đây là phiên bản simplified, dùng greedy matching thay vì Hungarian thực sự
-     * để đảm bảo thời gian xử lý < 3s với 300 requests
+     * @param array $costMatrix Cost matrix M×N (M requests, N slots)
+     * @param array $originalCostMatrix Cost matrix gốc để kiểm tra conflict/wrong type
+     * @param int $numRequests Số lượng requests
+     * @param int $numSlots Số lượng slots
+     * @return array Assignments: [requestIndex => slotIndex, ...] (-1 nếu không được gán)
      */
-    private static function hungarianAlgorithm($costMatrix)
+    private static function hungarianAlgorithm($costMatrix, $originalCostMatrix, $numRequests, $numSlots)
     {
-        $numRequests = count($costMatrix);
-        $numSlots = count($costMatrix[0]);
-
         // Đảm bảo matrix vuông (thêm dummy rows/cols nếu cần)
-        $matrix = self::makeSquareMatrix($costMatrix);
-        $n = count($matrix);
+        $n = max($numRequests, $numSlots);
+        $matrix = self::makeSquareMatrix($costMatrix, $numRequests, $numSlots, $n);
 
-        // Step 1: Subtract row minimum (chuẩn hóa hàng)
+        // Step 1: Subtract row minimum
         for ($i = 0; $i < $n; $i++) {
             $rowMin = min($matrix[$i]);
             for ($j = 0; $j < $n; $j++) {
@@ -372,7 +341,7 @@ class HungarianSlotAllocationService
             }
         }
 
-        // Step 2: Subtract column minimum (chuẩn hóa cột)
+        // Step 2: Subtract column minimum
         for ($j = 0; $j < $n; $j++) {
             $colMin = PHP_FLOAT_MAX;
             for ($i = 0; $i < $n; $i++) {
@@ -383,31 +352,50 @@ class HungarianSlotAllocationService
             }
         }
 
-        // Step 3: Find optimal assignment bằng greedy matching
-        $assignments = self::findOptimalAssignment($matrix, $numRequests, $numSlots);
+        // Step 3: Find maximum matching using augmenting path
+        $assignments = array_fill(0, $numRequests, -1);
+        $usedSlots = [];
+
+        // Khởi tạo: Tìm các zeros và gán trực tiếp nếu có thể
+        for ($i = 0; $i < $numRequests; $i++) {
+            for ($j = 0; $j < $numSlots; $j++) {
+                // Chỉ gán nếu:
+                // 1. Cost sau chuẩn hóa = 0 (hoặc gần 0)
+                // 2. Original cost < WRONG_TYPE_PENALTY (đúng type và không conflict)
+                // 3. Request và slot chưa được gán
+                if (
+                    $matrix[$i][$j] < 0.001
+                    && $originalCostMatrix[$i][$j] < self::WRONG_TYPE_PENALTY
+                    && $assignments[$i] === -1
+                    && !isset($usedSlots[$j])
+                ) {
+                    $assignments[$i] = $j;
+                    $usedSlots[$j] = true;
+                }
+            }
+        }
+
+        // Step 4: Tìm augmenting path cho các requests chưa được gán
+        for ($i = 0; $i < $numRequests; $i++) {
+            if ($assignments[$i] === -1) {
+                self::findAugmentingPath($matrix, $originalCostMatrix, $assignments, $usedSlots, $i, $numRequests, $numSlots);
+            }
+        }
 
         return $assignments;
     }
 
-
     /**
      * Tạo matrix vuông bằng cách thêm dummy rows/columns
-     *
-     * Nếu M > N: thêm dummy columns với cost cao
-     * Nếu N > M: thêm dummy rows với cost cao
      */
-    private static function makeSquareMatrix($matrix)
+    private static function makeSquareMatrix($matrix, $numRequests, $numSlots, $n)
     {
-        $numRows = count($matrix);
-        $numCols = count($matrix[0]);
-        $n = max($numRows, $numCols);
-
         $squareMatrix = [];
 
         for ($i = 0; $i < $n; $i++) {
             $squareMatrix[$i] = [];
             for ($j = 0; $j < $n; $j++) {
-                if ($i < $numRows && $j < $numCols) {
+                if ($i < $numRequests && $j < $numSlots) {
                     // Giữ nguyên giá trị gốc
                     $squareMatrix[$i][$j] = $matrix[$i][$j];
                 } else {
@@ -421,55 +409,66 @@ class HungarianSlotAllocationService
     }
 
     /**
-     * Tìm assignment tối ưu bằng greedy matching
+     * Tìm augmenting path để gán request chưa được gán
      *
-     * Quy trình:
-     * 1. Flatten matrix thành array các {request, slot, cost}
-     * 2. Sort theo cost (từ thấp đến cao)
-     * 3. Greedy: Gán request cho slot có cost thấp nhất chưa được gán
-     *
-     * Time Complexity: O(M × N × log(M × N)) - do sort
-     *
+     * Sử dụng DFS để tìm path từ request chưa được gán đến slot chưa được dùng
      */
-    private static function findOptimalAssignment($matrix, $numRequests, $numSlots)
+    private static function findAugmentingPath($matrix, $originalCostMatrix, &$assignments, &$usedSlots, $requestIndex, $numRequests, $numSlots)
     {
-        $n = count($matrix);
-        $assignments = array_fill(0, $numRequests, -1); // -1 = chưa được gán
-        $usedSlots = [];
+        $visited = [];
+        $path = [];
 
-        // Flatten matrix thành array để sort
-        $flatMatrix = [];
-        for ($i = 0; $i < $numRequests; $i++) {
-            for ($j = 0; $j < $numSlots; $j++) {
-                $flatMatrix[] = [
-                    'request' => $i,
-                    'slot' => $j,
-                    'cost' => $matrix[$i][$j]
-                ];
-            }
-        }
-
-        // Sort theo cost (thấp đến cao) - O(M × N × log(M × N))
-        usort($flatMatrix, fn($a, $b) => $a['cost'] <=> $b['cost']);
-
-        // Greedy assignment: Gán request cho slot có cost thấp nhất chưa được gán
-        foreach ($flatMatrix as $cell) {
-            $reqIdx = $cell['request'];
-            $slotIdx = $cell['slot'];
-
-            // Chỉ gán nếu request chưa được gán và slot chưa được dùng
-            if ($assignments[$reqIdx] === -1 && !isset($usedSlots[$slotIdx])) {
+        if (self::dfs($matrix, $originalCostMatrix, $assignments, $usedSlots, $visited, $path, $requestIndex, $numRequests, $numSlots)) {
+            // Đảo ngược path để gán
+            for ($i = 0; $i < count($path) - 1; $i += 2) {
+                $reqIdx = $path[$i];
+                $slotIdx = $path[$i + 1];
                 $assignments[$reqIdx] = $slotIdx;
                 $usedSlots[$slotIdx] = true;
             }
+        }
+    }
 
-            // Dừng khi đã gán hết requests
-            if (count($usedSlots) >= $numRequests) {
-                break;
+    /**
+     * DFS để tìm augmenting path
+     */
+    private static function dfs($matrix, $originalCostMatrix, $assignments, &$usedSlots, &$visited, &$path, $requestIndex, $numRequests, $numSlots)
+    {
+        if (isset($visited[$requestIndex])) {
+            return false;
+        }
+
+        $visited[$requestIndex] = true;
+        $path[] = $requestIndex;
+
+        // Tìm slot chưa được dùng có cost thấp (sau chuẩn hóa gần 0)
+        for ($j = 0; $j < $numSlots; $j++) {
+            // Chỉ xét nếu original cost < WRONG_TYPE_PENALTY (đúng type và không conflict)
+            if ($originalCostMatrix[$requestIndex][$j] >= self::WRONG_TYPE_PENALTY) {
+                continue;
+            }
+
+            // Nếu slot chưa được dùng và cost sau chuẩn hóa gần 0
+            if (!isset($usedSlots[$j]) && $matrix[$requestIndex][$j] < 0.001) {
+                $path[] = $j;
+                return true; // Tìm thấy augmenting path
+            }
+
+            // Nếu slot đã được dùng, tìm request khác đã gán slot này
+            if (isset($usedSlots[$j])) {
+                $assignedRequest = array_search($j, $assignments);
+                if ($assignedRequest !== false && $assignedRequest !== $requestIndex) {
+                    // Thử tìm path từ request đã được gán
+                    if (self::dfs($matrix, $originalCostMatrix, $assignments, $usedSlots, $visited, $path, $assignedRequest, $numRequests, $numSlots)) {
+                        $path[] = $j;
+                        return true;
+                    }
+                }
             }
         }
 
-        return $assignments;
+        array_pop($path); // Backtrack
+        return false;
     }
 
     /**

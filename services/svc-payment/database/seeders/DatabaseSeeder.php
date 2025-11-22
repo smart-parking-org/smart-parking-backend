@@ -15,6 +15,8 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         Schema::disableForeignKeyConstraints();
+        DB::table('slot_gate_distances')->truncate();
+        DB::table('gates')->truncate();
         DB::table('parking_slots')->truncate();
         DB::table('reservations')->truncate();
         DB::table('reservation_requests')->truncate();
@@ -28,7 +30,9 @@ class DatabaseSeeder extends Seeder
         try {
             $this->call([
                 ParkingLotSeeder::class,
+                GateSeeder::class,
                 ParkingSlotSeeder::class,
+                SlotGateDistanceSeeder::class,
                 PricingRuleSeeder::class,
                 PeakHourSeeder::class,
                 ExtensionPolicySeeder::class
