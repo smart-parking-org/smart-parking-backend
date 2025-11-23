@@ -17,7 +17,7 @@ return new class extends Migration {
             $table->foreignId('reservation_request_id')->nullable()
                 ->constrained('reservation_requests', 'id')->nullOnDelete();
 
-            $table->foreignId('slot_id')->constrained('parking_slots', 'id')->cascadeOnDelete();
+            $table->foreignId('slot_id')->nullable()->constrained('parking_slots', 'id')->cascadeOnDelete();
             $table->string('reservation_code', 50)->unique();
 
             // Trạng thái

@@ -51,7 +51,7 @@ class ParkingSlot extends Model
     public function currentReservation()
     {
         return $this->hasOne(Reservation::class, 'slot_id')
-            ->whereIn('status', ['confirmed', 'checked_in'])
+            ->whereIn('status', ['checked_in', 'pending_checkout'])
             ->latest();
     }
 
@@ -60,42 +60,27 @@ class ParkingSlot extends Model
         return $query->with([
             'currentReservation' => function ($query) {
                 $now = now();
-                $query->whereIn('status', ['confirmed', 'checked_in'])
-                    ->where(function ($q) use ($now) {
-                        // Confirmed: check expires_at
-                        $q->where(function ($qq) use ($now) {
-                            $qq->where('status', 'confirmed')
-                                ->where('start_time', '<=', $now)
-                                ->where('expires_at', '>=', $now);
-                        })
-                            // Checked_in: check end_time
-                            ->orWhere(function ($qq) use ($now) {
-                            $qq->where('status', 'checked_in')
-                                ->where('start_time', '<=', $now)
-                                ->where('end_time', '>=', $now);
-                        });
-                    });
+                $query->whereIn('status', ['checked_in', 'pending_checkout'])
+                    ->where('start_time', '<=', $now)
+                    ->where('end_time', '>=', $now);
             }
         ]);
     }
 
-    // Trạng thái thực tế: nếu có reservation hiện tại → hold, ngược lại dùng status của slot
+    // Trạng thái thực tế: nếu có reservation checked_in/pending_checkout → occupied, ngược lại available
     public function getEffectiveStatusAttribute(): string
     {
         $now = now();
 
-        // Lấy reservation một lần
+        // Lấy reservation hiện tại (chỉ checked_in hoặc pending_checkout)
         $reservation = $this->currentReservation;
 
-        // Kiểm tra reservation có tồn tại và hợp lệ không
-        if (
-            $reservation &&
-            $reservation->status === 'confirmed'
-        ) {
-            return 'hold';
+        // Nếu có reservation active → occupied
+        if ($reservation) {
+            return 'occupied';
         }
 
-
-        return $this->status;
+        // Không có reservation → available
+        return 'available';
     }
 }

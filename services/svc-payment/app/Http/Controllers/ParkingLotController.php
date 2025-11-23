@@ -7,6 +7,7 @@ use App\Models\ParkingSlot;
 use App\Models\Reservation;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Carbon\Carbon;
 
 /**
  * @OA\Tag(
@@ -61,25 +62,61 @@ class ParkingLotController extends Controller
 
         $slots = ParkingSlot::where('parking_lot_id', $id)
             ->withActiveReservations()
-            ->select('id', 'slot_code', 'vehicle_type', 'status')
+            ->select('id', 'slot_code', 'vehicle_type', 'status', 'position_x', 'position_y')
             ->get();
+
+        // Đếm số reservation confirmed chưa có slot_id (đang giữ chỗ nhưng chưa được gán slot cụ thể)
+        $now = now();
+        $confirmedReservationsWithoutSlot = Reservation::whereNull('slot_id')
+            ->where('status', 'confirmed')
+            ->whereHas('reservationRequest', function ($q) use ($id) {
+                $q->where('parking_lot_id', $id);
+            })
+            ->where('start_time', '<=', $now)
+            ->where('expires_at', '>=', $now)
+            ->count();
+
+        // Đếm trạng thái slot: available = slot không có reservation checked_in/pending_checkout
+        $physicalAvailable = $slots->where('effective_status', 'available')->count();
+        $occupied = $slots->where('effective_status', 'occupied')->count();
+        
+        // Số slot thực sự khả dụng cho đặt chỗ mới = physical available - pending_assignments
+        $availableForNewReservation = max(0, $physicalAvailable - $confirmedReservationsWithoutSlot);
 
         $summary = [
             'total' => $slots->count(),
-            'available' => $slots->where('effective_status', 'available')->count(),
-            'hold' => $slots->where('effective_status', 'hold')->count(),
-            'occupied' => $slots->where('effective_status', 'occupied')->count(),
+            'available' => $availableForNewReservation, // Số slot thực sự có thể đặt chỗ mới
+            'occupied' => $occupied,
+            'pending_assignments' => $confirmedReservationsWithoutSlot, // Số reservation đang chờ được gán slot
+            'physical_available' => $physicalAvailable, // Số slot không có reservation checked_in/pending_checkout (chưa trừ pending)
         ];
 
         $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
         $byVehicleType = [];
         foreach ($vehicleTypes as $type) {
             $typeSlots = $slots->where('vehicle_type', $type);
+            
+            // Đếm reservation confirmed chưa có slot_id cho loại xe này
+            $pendingForType = Reservation::whereNull('slot_id')
+                ->where('status', 'confirmed')
+                ->whereHas('reservationRequest', function ($q) use ($id, $type) {
+                    $q->where('parking_lot_id', $id)
+                        ->where('vehicle_type', $type);
+                })
+                ->where('start_time', '<=', $now)
+                ->where('expires_at', '>=', $now)
+                ->count();
+
+            $physicalAvailableForType = $typeSlots->where('effective_status', 'available')->count();
+            $occupiedForType = $typeSlots->where('effective_status', 'occupied')->count();
+            $availableForNewReservationForType = max(0, $physicalAvailableForType - $pendingForType);
+
             $byVehicleType[$type] = [
                 'total' => $typeSlots->count(),
-                'available' => $typeSlots->where('effective_status', 'available')->count(),
-                'hold' => $typeSlots->where('effective_status', 'hold')->count(),
-                'occupied' => $typeSlots->where('effective_status', 'occupied')->count(),
+                'available' => $availableForNewReservationForType, // Số slot thực sự có thể đặt chỗ mới cho loại xe này
+                'occupied' => $occupiedForType,
+                'pending_assignments' => $pendingForType, // Số reservation đang chờ gán slot cho loại xe này
+                'physical_available' => $physicalAvailableForType, // Số slot không có reservation checked_in/pending_checkout (chưa trừ pending)
             ];
         }
 
@@ -135,25 +172,61 @@ class ParkingLotController extends Controller
 
         $slots = ParkingSlot::where('parking_lot_id', $id)
             ->withActiveReservations()
-            ->select('vehicle_type', 'status')
+            ->select('id', 'vehicle_type', 'status')
             ->get();
+
+        // Đếm số reservation confirmed chưa có slot_id (đang giữ chỗ nhưng chưa được gán slot cụ thể)
+        $now = now();
+        $confirmedReservationsWithoutSlot = Reservation::whereNull('slot_id')
+            ->where('status', 'confirmed')
+            ->whereHas('reservationRequest', function ($q) use ($id) {
+                $q->where('parking_lot_id', $id);
+            })
+            ->where('start_time', '<=', $now)
+            ->where('expires_at', '>=', $now)
+            ->count();
+
+        // Đếm trạng thái slot: available = slot không có reservation checked_in/pending_checkout
+        $physicalAvailable = $slots->where('effective_status', 'available')->count();
+        $occupied = $slots->where('effective_status', 'occupied')->count();
+        
+        // Số slot thực sự khả dụng cho đặt chỗ mới = physical available - pending_assignments
+        $availableForNewReservation = max(0, $physicalAvailable - $confirmedReservationsWithoutSlot);
 
         $summary = [
             'total' => $slots->count(),
-            'available' => $slots->where('effective_status', 'available')->count(),
-            'hold' => $slots->where('effective_status', 'hold')->count(),
-            'occupied' => $slots->where('effective_status', 'occupied')->count(),
+            'available' => $availableForNewReservation, // Số slot thực sự có thể đặt chỗ mới
+            'occupied' => $occupied,
+            'pending_assignments' => $confirmedReservationsWithoutSlot, // Số reservation đang chờ được gán slot
+            'physical_available' => $physicalAvailable, // Số slot không có reservation checked_in/pending_checkout (chưa trừ pending)
         ];
 
         $vehicleTypes = ['motorbike', 'car_4_seat', 'car_7_seat', 'light_truck'];
         $byVehicleType = [];
         foreach ($vehicleTypes as $type) {
             $typeSlots = $slots->where('vehicle_type', $type);
+            
+            // Đếm reservation confirmed chưa có slot_id cho loại xe này
+            $pendingForType = Reservation::whereNull('slot_id')
+                ->where('status', 'confirmed')
+                ->whereHas('reservationRequest', function ($q) use ($id, $type) {
+                    $q->where('parking_lot_id', $id)
+                        ->where('vehicle_type', $type);
+                })
+                ->where('start_time', '<=', $now)
+                ->where('expires_at', '>=', $now)
+                ->count();
+
+            $physicalAvailableForType = $typeSlots->where('effective_status', 'available')->count();
+            $occupiedForType = $typeSlots->where('effective_status', 'occupied')->count();
+            $availableForNewReservationForType = max(0, $physicalAvailableForType - $pendingForType);
+
             $byVehicleType[$type] = [
                 'total' => $typeSlots->count(),
-                'available' => $typeSlots->where('effective_status', 'available')->count(),
-                'hold' => $typeSlots->where('effective_status', 'hold')->count(),
-                'occupied' => $typeSlots->where('effective_status', 'occupied')->count(),
+                'available' => $availableForNewReservationForType, // Số slot thực sự có thể đặt chỗ mới cho loại xe này
+                'occupied' => $occupiedForType,
+                'pending_assignments' => $pendingForType, // Số reservation đang chờ gán slot cho loại xe này
+                'physical_available' => $physicalAvailableForType, // Số slot không có reservation checked_in/pending_checkout (chưa trừ pending)
             ];
         }
 
@@ -196,24 +269,49 @@ class ParkingLotController extends Controller
             @ob_flush();
             @flush();
 
-
             // Chạy 30 phút (1800 lần * 2s = 3600s)
             for ($i = 0; $i < 1800; $i++) {
                 if (connection_aborted()) {
                     break;
                 }
 
-                // Query DB
+                $now = now();
+
+                // Query DB - chỉ lấy slots với reservation checked_in/pending_checkout
                 $slots = ParkingSlot::where('parking_lot_id', $lot->id)
                     ->withActiveReservations()
-                    ->select('id', 'slot_code', 'vehicle_type', 'status')
+                    ->select('id', 'slot_code', 'vehicle_type', 'status', 'position_x', 'position_y')
                     ->orderBy('id')
                     ->get();
+
+                // Đếm số reservation confirmed chưa có slot_id
+                $confirmedReservationsWithoutSlot = Reservation::whereNull('slot_id')
+                    ->where('status', 'confirmed')
+                    ->whereHas('reservationRequest', function ($q) use ($lot) {
+                        $q->where('parking_lot_id', $lot->id);
+                    })
+                    ->where('start_time', '<=', $now)
+                    ->where('expires_at', '>=', $now)
+                    ->count();
+
+                // Tính summary
+                $physicalAvailable = $slots->where('effective_status', 'available')->count();
+                $occupied = $slots->where('effective_status', 'occupied')->count();
+                $availableForNewReservation = max(0, $physicalAvailable - $confirmedReservationsWithoutSlot);
+
+                $summary = [
+                    'total' => $slots->count(),
+                    'available' => $availableForNewReservation, // Số slot thực sự có thể đặt chỗ mới
+                    'occupied' => $occupied,
+                    'pending_assignments' => $confirmedReservationsWithoutSlot,
+                    'physical_available' => $physicalAvailable, // Số slot không có reservation checked_in/pending_checkout (chưa trừ pending)
+                ];
 
                 $payload = [
                     'type' => 'slot_snapshot',
                     'slots' => $slots->toArray(),
-                    'lasted_updated' => now()->toIso8601String()
+                    'summary' => $summary,
+                    'last_updated' => now()->toIso8601String()
                 ];
 
                 echo "event: message\n";

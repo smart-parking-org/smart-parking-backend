@@ -25,7 +25,7 @@ class ReservationStoreRequest extends FormRequest
             'vehicle_id' => 'required|integer',
             'desired_start_time' => 'required|date|after_or_equal:now',
             'duration_minutes' => 'required|integer|min:30|max:1440',
-            'gate_id' => 'nullable|integer|exists:gates,id',
+            // gate_id không cần truyền lên khi đặt chỗ, sẽ truyền khi check-in
         ];
     }
 

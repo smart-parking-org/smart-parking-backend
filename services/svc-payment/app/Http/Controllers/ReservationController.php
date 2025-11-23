@@ -7,6 +7,7 @@ use App\Models\ExtensionPolicy;
 use App\Models\MonthlyPass;
 use App\Models\Payment;
 use App\Models\PeakHour;
+use App\Models\SlotGateDistance;
 use App\Services\AuthService;
 use App\Services\ParkingFeeService;
 use App\Services\PriorityQueueSlotAllocationService;
@@ -171,7 +172,7 @@ class ReservationController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Reservation::with(['slot', 'reservationRequest.gate', 'payment']);
+        $query = Reservation::with(['slot.parkingLot', 'reservationRequest.gate', 'reservationRequest.parkingLot', 'payment']);
 
         // Filter theo user_id
         if ($request->filled('user_id')) {
@@ -180,8 +181,15 @@ class ReservationController extends Controller
 
         // Filter theo vehicle_type
         if ($request->filled('vehicle_type')) {
-            $query->whereHas('slot', function ($q) use ($request) {
-                $q->where('vehicle_type', $request->vehicle_type);
+            $query->where(function ($q) use ($request) {
+                // Nếu có slot → filter qua slot
+                $q->whereHas('slot', function ($slotQuery) use ($request) {
+                    $slotQuery->where('vehicle_type', $request->vehicle_type);
+                })
+                // Nếu chưa có slot → filter qua reservation_request
+                ->orWhereHas('reservationRequest', function ($requestQuery) use ($request) {
+                    $requestQuery->where('vehicle_type', $request->vehicle_type);
+                });
             });
         }
 
@@ -192,8 +200,16 @@ class ReservationController extends Controller
 
         // Filter theo parking_lot_id
         if ($request->filled('parking_lot_id')) {
-            $query->whereHas('slot', function ($q) use ($request) {
-                $q->where('parking_lot_id', $request->parking_lot_id);
+            $parkingLotId = (int) $request->parking_lot_id;
+            $query->where(function ($q) use ($parkingLotId) {
+                // Nếu có slot → filter qua slot.parking_lot_id
+                $q->whereHas('slot', function ($slotQuery) use ($parkingLotId) {
+                    $slotQuery->where('parking_lot_id', $parkingLotId);
+                })
+                // Nếu chưa có slot → filter qua reservation_request.parking_lot_id
+                ->orWhereHas('reservationRequest', function ($requestQuery) use ($parkingLotId) {
+                    $requestQuery->where('parking_lot_id', $parkingLotId);
+                });
             });
         }
 
@@ -212,25 +228,72 @@ class ReservationController extends Controller
         $perPage = $request->get('per_page', 15);
         $reservations = $query->paginate($perPage);
 
-        // Summary statistics
+        // Summary statistics (áp dụng cùng filter với query chính)
+        $summaryQuery = Reservation::query();
+        
+        // Áp dụng filter parking_lot_id cho summary nếu có
+        if ($request->filled('parking_lot_id')) {
+            $parkingLotId = (int) $request->parking_lot_id;
+            $summaryQuery->where(function ($q) use ($parkingLotId) {
+                $q->whereHas('slot', function ($slotQuery) use ($parkingLotId) {
+                    $slotQuery->where('parking_lot_id', $parkingLotId);
+                })
+                ->orWhereHas('reservationRequest', function ($requestQuery) use ($parkingLotId) {
+                    $requestQuery->where('parking_lot_id', $parkingLotId);
+                });
+            });
+        }
+        
         $summary = [
-            'total_reservations' => Reservation::count(),
-            'confirmed' => Reservation::where('status', 'confirmed')->count(),
-            'checked_in' => Reservation::where('status', 'checked_in')->count(),
-            'pending_checkout' => Reservation::where('status', 'pending_checkout')->count(),
-            'checked_out' => Reservation::where('status', 'checked_out')->count(),
-            'cancelled' => Reservation::where('status', 'cancelled')->count(),
-            'expired' => Reservation::where('status', 'expired')->count(),
+            'total_reservations' => (clone $summaryQuery)->count(),
+            'confirmed' => (clone $summaryQuery)->where('status', 'confirmed')->count(),
+            'checked_in' => (clone $summaryQuery)->where('status', 'checked_in')->count(),
+            'pending_checkout' => (clone $summaryQuery)->where('status', 'pending_checkout')->count(),
+            'checked_out' => (clone $summaryQuery)->where('status', 'checked_out')->count(),
+            'cancelled' => (clone $summaryQuery)->where('status', 'cancelled')->count(),
+            'expired' => (clone $summaryQuery)->where('status', 'expired')->count(),
         ];
 
-        // Transform reservations để đưa gate ra cùng cấp với reservation_request
+        // Transform reservations để đưa gate và parking_lot ra cùng cấp với reservation
         $transformedReservations = $reservations->getCollection()->map(function ($reservation) {
             $data = $reservation->toArray();
             
             // Tách gate ra khỏi reservation_request và đặt ở cùng cấp
+            $gate = null;
             if (isset($data['reservation_request']['gate'])) {
-                $data['gate'] = $data['reservation_request']['gate'];
+                $gate = $data['reservation_request']['gate'];
+                $data['gate'] = $gate;
                 unset($data['reservation_request']['gate']);
+            }
+
+            // ✅ Lấy thông tin parking lot: từ slot nếu có, nếu không thì từ reservation_request
+            $parkingLot = null;
+            if (isset($data['slot']['parking_lot']) && $data['slot']['parking_lot']) {
+                $parkingLot = $data['slot']['parking_lot'];
+            } elseif (isset($data['reservation_request']['parking_lot']) && $data['reservation_request']['parking_lot']) {
+                $parkingLot = $data['reservation_request']['parking_lot'];
+            }
+
+            // ✅ Đưa parking_lot ra cùng cấp với reservation
+            if ($parkingLot) {
+                $data['parking_lot'] = $parkingLot;
+            }
+
+            // ✅ Lấy khoảng cách từ slot đến cổng (nếu có slot và gate)
+            $distanceFromGate = null;
+            if (isset($data['slot']['id']) && $gate && isset($gate['id'])) {
+                $slotGateDistance = SlotGateDistance::where('slot_id', $data['slot']['id'])
+                    ->where('gate_id', $gate['id'])
+                    ->first();
+                
+                if ($slotGateDistance) {
+                    $distanceFromGate = (float) $slotGateDistance->distance;
+                }
+            }
+            
+            // ✅ Thêm khoảng cách vào response
+            if ($distanceFromGate !== null) {
+                $data['distance_from_gate_meters'] = $distanceFromGate;
             }
             
             return $data;
@@ -255,37 +318,36 @@ class ReservationController extends Controller
      * @OA\Post(
      *     path="/reservations",
      *     tags={"🎫 Reservations"},
-     *     summary="Đặt chỗ với thuật toán cấp chỗ tự động",
-     *     description="Yêu cầu các trường: parking_lot_id, user_id, vehicle_id, vehicle_type, desired_start_time, duration_minutes. Thuật toán mặc định priority_queue.",
+     *     summary="Đặt chỗ (chưa gán slot cụ thể)",
+     *     description="Yêu cầu các trường: parking_lot_id, user_id, vehicle_id, desired_start_time, duration_minutes. Reservation sẽ được tạo với status='confirmed' nhưng chưa có slot_id. Slot sẽ được gán khi check-in với gate_id.",
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
-     *             required={"parking_lot_id","user_id","vehicle_id","vehicle_type","desired_start_time","duration_minutes"},
+     *             required={"parking_lot_id","user_id","vehicle_id","desired_start_time","duration_minutes"},
      *             @OA\Property(property="parking_lot_id", type="integer", example=1),
      *             @OA\Property(property="user_id", type="integer", example=2),
      *             @OA\Property(property="vehicle_id", type="integer", example=1),
      *             @OA\Property(property="desired_start_time", type="string", format="date-time", example="2025-10-22T17:12:00.000000Z"),
      *             @OA\Property(property="duration_minutes", type="integer", minimum=30, maximum=1440, example=120),
-     *             @OA\Property(property="gate_id", type="integer", nullable=true, example=1, description="ID cổng vào (tùy chọn, nếu không có sẽ chọn slot gần cổng gần nhất)"),
      *         )
      *     ),
      *     @OA\Response(
      *         response=201,
-     *         description="Đặt chỗ thành công",
+     *         description="Đặt chỗ thành công (chưa gán slot)",
      *         @OA\JsonContent(
      *             @OA\Property(property="success", type="boolean", example=true),
-     *             @OA\Property(property="message", type="string", example="Đặt chỗ thành công"),
+     *             @OA\Property(property="message", type="string", example="Đặt chỗ thành công. Vui lòng check-in tại cổng để được cấp chỗ cụ thể."),
      *             @OA\Property(
      *                 property="data",
      *                 type="object",
      *                 @OA\Property(
      *                     property="reservation",
      *                     type="object",
-     *                     description="Bản ghi reservation đã tạo",
+     *                     description="Bản ghi reservation đã tạo (chưa có slot_id)",
      *                     @OA\Property(property="id", type="integer", example=1),
      *                     @OA\Property(property="user_id", type="integer", example=2),
      *                     @OA\Property(property="vehicle_id", type="integer", example=1),
-     *                     @OA\Property(property="slot_id", type="integer", example=1),
+     *                     @OA\Property(property="slot_id", type="integer", nullable=true, example=null, description="Chưa có slot, sẽ được gán khi check-in"),
      *                     @OA\Property(property="reservation_request_id", type="integer", example=2),
      *                     @OA\Property(property="reservation_code", type="string", example="RES-TDZKIUQ9-20251022"),
      *                     @OA\Property(property="status", type="string", example="confirmed"),
@@ -325,76 +387,10 @@ class ReservationController extends Controller
      *                         @OA\Property(property="updated_at", type="string", format="date-time", example="2025-10-22T17:09:59.000000Z")
      *                     )
      *                 ),
-     *                 @OA\Property(
-     *                     property="allocated_slot",
-     *                     type="object",
-     *                     description="Chỗ được cấp",
-     *                     @OA\Property(property="id", type="integer", example=1),
-     *                     @OA\Property(property="parking_lot_id", type="integer", example=1),
-     *                     @OA\Property(property="slot_code", type="string", example="MB-001"),
-     *                     @OA\Property(property="vehicle_type", type="string", example="motorbike"),
-     *                     @OA\Property(property="status", type="string", example="available"),
-     *                     @OA\Property(property="position_x", type="string", example="10.806176400733000"),
-     *                     @OA\Property(property="position_y", type="string", example="106.628667651080000"),
-     *                     @OA\Property(property="distance_from_gate", type="string", example="0.00"),
-     *                     @OA\Property(property="created_at", type="string", format="date-time", example="2025-10-22T17:09:59.000000Z"),
-     *                     @OA\Property(property="updated_at", type="string", format="date-time", example="2025-10-22T17:09:59.000000Z"),
-     *                     @OA\Property(property="effective_status", type="string", example="available"),
-     *                     @OA\Property(
-     *                         property="current_reservation",
-     *                         type="object",
-     *                         description="Reservation hiện tại của slot",
-     *                         @OA\Property(property="id", type="integer", example=1),
-     *                         @OA\Property(property="user_id", type="integer", example=2),
-     *                         @OA\Property(property="vehicle_id", type="integer", example=1),
-     *                         @OA\Property(property="reservation_request_id", type="integer", example=2),
-     *                         @OA\Property(property="slot_id", type="integer", example=1),
-     *                         @OA\Property(property="reservation_code", type="string", example="RES-TDZKIUQ9-20251022"),
-     *                         @OA\Property(property="status", type="string", example="confirmed"),
-     *                         @OA\Property(property="start_time", type="string", format="date-time", example="2025-10-22T17:12:00.000000Z"),
-     *                         @OA\Property(property="end_time", type="string", format="date-time", example="2025-10-22T19:12:00.000000Z"),
-     *                         @OA\Property(property="expires_at", type="string", format="date-time", example="2025-10-22T17:27:00.000000Z"),
-     *                         @OA\Property(property="extended_at", type="string", format="date-time", example=null),
-     *                         @OA\Property(property="check_in_at", type="string", format="date-time", example=null),
-     *                         @OA\Property(property="check_out_at", type="string", format="date-time", example=null),
-     *                         @OA\Property(property="cancelled_at", type="string", format="date-time", example=null),
-     *                         @OA\Property(property="created_at", type="string", format="date-time", example="2025-10-22T17:11:10.000000Z"),
-     *                         @OA\Property(property="updated_at", type="string", format="date-time", example="2025-10-22T17:11:10.000000Z"),
-     *                         @OA\Property(
-     *                             property="user_snapshot",
-     *                             type="object",
-     *                             @OA\Property(property="id", type="integer", example=2),
-     *                             @OA\Property(property="name", type="string", example="Nguyễn Văn A"),
-     *                             @OA\Property(property="email", type="string", example="nguyevana@gmail.com"),
-     *                             @OA\Property(property="phone", type="string", example="0342123564")
-     *                         ),
-     *                         @OA\Property(
-     *                             property="vehicle_snapshot",
-     *                             type="object",
-     *                             @OA\Property(property="id", type="integer", example=1),
-     *                             @OA\Property(property="vehicle_type", type="string", example="motorbike"),
-     *                             @OA\Property(property="license_plate", type="string", example="94K-123.45")
-     *                         ),
-     *                         @OA\Property(
-     *                             property="pricing_snapshot",
-     *                             type="object",
-     *                             @OA\Property(property="id", type="integer", example=1),
-     *                             @OA\Property(property="hourly", type="integer", example=5000),
-     *                             @OA\Property(property="daily_cap", type="integer", example=50000),
-     *                             @OA\Property(property="created_at", type="string", format="date-time", example="2025-10-22T17:09:59.000000Z"),
-     *                             @OA\Property(property="updated_at", type="string", format="date-time", example="2025-10-22T17:09:59.000000Z"),
-     *                             @OA\Property(property="monthly_pass", type="integer", example=300000),
-     *                             @OA\Property(property="peak_enabled", type="boolean", example=true),
-     *                             @OA\Property(property="vehicle_type", type="string", example="motorbike"),
-     *                             @OA\Property(property="parking_lot_id", type="integer", example=1),
-     *                             @OA\Property(property="peak_multiplier", type="number", example=1.5),
-     *                             @OA\Property(property="rounding_minutes", type="integer", example=30)
-     *                         )
-     *                     )
-     *                 ),
-     *                 @OA\Property(property="algorithm_used", type="string", example="priority_queue"),
-     *                 @OA\Property(property="processing_time_ms", type="integer", example=302),
-     *                 @OA\Property(property="qr_payload", type="string", example="RES-TDZKIUQ9-20251022")
+     *                 @OA\Property(property="allocated_slot", type="null", example=null, description="Chưa có slot, sẽ được gán khi check-in"),
+     *                 @OA\Property(property="algorithm_used", type="null", example=null, description="Chưa chạy thuật toán"),
+     *                 @OA\Property(property="processing_time_ms", type="null", example=null, description="Chưa chạy thuật toán"),
+     *                 @OA\Property(property="qr_payload", type="string", example="RES-TDZKIUQ9-20251022", description="Dùng reservation_code để check-in")
      *             )
      *         )
      *     ),
@@ -418,7 +414,7 @@ class ReservationController extends Controller
         $duration = (int) $validated['duration_minutes'];
         $userId = (int) $validated['user_id'];
         $vehicleId = (int) $validated['vehicle_id'];
-        $gateId = isset($validated['gate_id']) ? (int) $validated['gate_id'] : null;
+        // gate_id không cần truyền lên khi đặt chỗ, sẽ truyền khi check-in
         $algorithm = $validated['algorithm'] ?? 'priority_queue';
 
         // Kiểm tra user tồn tại và active
@@ -503,8 +499,22 @@ class ReservationController extends Controller
         $vehicleType = $vehicleData['vehicle_type'];
 
         return DB::transaction(
-            function () use ($parkingLotId, $vehicleType, $desiredStart, $duration, $userId, $vehicleId, $gateId, $algorithm) {
-                // 1. Tạo reservation request
+            function () use ($parkingLotId, $vehicleType, $desiredStart, $duration, $userId, $vehicleId, $algorithm) {
+                // ✅ Kiểm tra monthly pass
+                $start = Carbon::parse($desiredStart)->utc();
+                $end = $start->copy()->addMinutes($duration);
+                
+                // ✅ KIỂM TRA VÀ GIỮ CHỖ: Đảm bảo còn slot trống cho loại xe này
+                $availableSlots = $this->checkAvailableSlotsForReservation($parkingLotId, $vehicleType, $start, $end);
+                
+                if ($availableSlots <= 0) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Không còn chỗ trống cho loại xe này trong khung giờ đã chọn'
+                    ], 422);
+                }
+
+                // 1. Tạo reservation request (chưa có gate_id, status = pending)
                 $reservationRequest = ReservationRequest::create([
                     'parking_lot_id' => $parkingLotId,
                     'user_id' => $userId,
@@ -512,38 +522,11 @@ class ReservationController extends Controller
                     'vehicle_type' => $vehicleType,
                     'desired_start_time' => $desiredStart,
                     'duration_minutes' => $duration,
-                    'gate_id' => $gateId,
+                    'gate_id' => null, // Chưa có gate_id, sẽ được cập nhật khi check-in
                     'status' => 'pending',
                     'requested_at' => now(),
                 ]);
 
-                // 2. Chọn thuật toán cấp chỗ
-                $allocatedSlot = PriorityQueueSlotAllocationService::allocateSlot($reservationRequest);
-
-                if (!$allocatedSlot) {
-                    $reservationRequest->update(['status' => 'failed']);
-                    \Log::info('Loi 6');
-
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Không có chỗ trống phù hợp với loại xe này'
-                    ], 422);
-                }
-
-                // 3. Final guard: kiểm tra chồng lấn lần cuối ngay trước khi tạo reservation
-                $start = Carbon::parse($desiredStart)->utc();
-                $end = $start->copy()->addMinutes($duration);
-                if (TimeOverlapService::hasOverlapOnSlot($allocatedSlot->id, $start, $end)) {
-                    $reservationRequest->update(['status' => 'failed']);
-                    \Log::info('Loi 7');
-
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Khung giờ đã bị trùng, vui lòng thử lại'
-                    ], 422);
-                }
-
-                // ✅ Kiểm tra monthly pass
                 $monthlyPass = MonthlyPass::findValidPass(
                     $userId,
                     $vehicleId,
@@ -551,33 +534,33 @@ class ReservationController extends Controller
                     $start->toDateString()
                 );
 
-                // 4. Tạo Reservation (confirmed) + giữ chỗ 15 phút
+                // 2. Tạo Reservation (confirmed) nhưng CHƯA GÁN SLOT (slot_id = null)
+                // Slot sẽ được gán khi check-in với gate_id
+                // ✅ GIỮ CHỖ 15 PHÚT: expires_at để người dùng có thời gian đến cổng và check-in
                 $reservation = Reservation::create([
                     'user_id' => $reservationRequest->user_id,
                     'vehicle_id' => $reservationRequest->vehicle_id,
-                    'slot_id' => $allocatedSlot->id,
+                    'slot_id' => null, // Chưa gán slot, sẽ gán khi check-in
                     'reservation_request_id' => $reservationRequest->id,
                     'reservation_code' => $this->generateReservationCode(),
                     'status' => 'confirmed',
                     'start_time' => $start,
-                    'end_time' => $start->copy()->addMinutes($duration),
-                    'expires_at' => $start->copy()->addMinutes(15),
+                    'end_time' => $end,
+                    'expires_at' => $start->copy()->addMinutes(15), // ✅ Giữ chỗ 15 phút, có thể gia hạn
                     'user_snapshot' => $this->getUserSnapshot($reservationRequest->user_id),
                     'vehicle_snapshot' => $this->getVehicleSnapshot($reservationRequest->vehicle_id),
                     'pricing_snapshot' => $this->getPricingSnapshot($reservationRequest->parking_lot_id, $reservationRequest->vehicle_type)
                 ]);
-                // 5. Cập nhật Request → assigned
-                $reservationRequest->update(['status' => 'assigned']);
 
                 return response()->json([
                     'success' => true,
-                    'message' => 'Đặt chỗ thành công',
+                    'message' => 'Đặt chỗ thành công. Vui lòng check-in tại cổng để được cấp chỗ cụ thể.',
                     'data' => [
                         'reservation' => $reservation,
-                        'allocated_slot' => $allocatedSlot,
-                        'algorithm_used' => $algorithm,
-                        'processing_time_ms' => $reservationRequest->processing_time_ms,
-                        'qr_payload' => $reservation->reservation_code, // dùng làm QR
+                        'allocated_slot' => null, // Chưa có slot
+                        'algorithm_used' => null, // Chưa chạy thuật toán
+                        'processing_time_ms' => null,
+                        'qr_payload' => $reservation->reservation_code, // dùng làm QR để check-in
                         'monthly_pass' => $monthlyPass && $monthlyPass->isValid($start->toDateString()) ? [
                             'id' => $monthlyPass->id,
                             'order_id' => $monthlyPass->order_id,
@@ -658,7 +641,21 @@ class ReservationController extends Controller
             ], 422);
         }
 
-        $parkingLotId = $reservation->slot->parking_lot_id;
+        // ✅ Lấy parking_lot_id: từ slot nếu có, nếu không thì từ reservation_request
+        $parkingLotId = null;
+        if ($reservation->slot_id !== null && $reservation->slot) {
+            $parkingLotId = $reservation->slot->parking_lot_id;
+        } elseif ($reservation->reservationRequest) {
+            $parkingLotId = $reservation->reservationRequest->parking_lot_id;
+        }
+
+        if (!$parkingLotId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không thể xác định bãi đỗ cho reservation này'
+            ], 422);
+        }
+
         $extensionPolicy = ExtensionPolicy::getForParkingLot($parkingLotId);
 
         if (!$extensionPolicy || !$extensionPolicy->value['is_active']) {
@@ -763,11 +760,13 @@ class ReservationController extends Controller
             'cancelled_at' => now()
         ]);
 
-        // Giải phóng slot
-        if ($reservation->slot && $reservation->slot->status === 'occupied') {
+        // ✅ Giải phóng slot (chỉ khi reservation đã có slot và slot đang occupied)
+        // Nếu reservation chưa có slot (slot_id = null) thì không cần giải phóng
+        if ($reservation->slot_id !== null && $reservation->slot && $reservation->slot->status === 'occupied') {
             $reservation->slot->update(['status' => 'available']);
         }
 
+        // ✅ Finalize reservation request (cập nhật status thành cancelled)
         $this->finalizeRequestIfAny($reservation, 'cancelled');
 
         return response()->json([
@@ -839,19 +838,28 @@ class ReservationController extends Controller
      *                     @OA\Property(property="processing_time_ms", type="number", example=12.35),
      *                     @OA\Property(property="gate_id", type="integer", example=1)
      *                 ),
-     *                 @OA\Property(
-     *                     property="gate",
-     *                     type="object",
-     *                     nullable=true,
-     *                     @OA\Property(property="id", type="integer", example=1),
-     *                     @OA\Property(property="gate_code", type="string", example="GATE-001"),
-     *                     @OA\Property(property="gate_type", type="string", enum={"entrance", "exit", "both"}, example="entrance"),
-     *                     @OA\Property(property="position_x", type="number", format="float", nullable=true),
-     *                     @OA\Property(property="position_y", type="number", format="float", nullable=true),
-     *                     @OA\Property(property="is_active", type="boolean", example=true)
-     *                 ),
-     *                 @OA\Property(
-     *                     property="user_snapshot",
+                 *                 @OA\Property(
+                 *                     property="gate",
+                 *                     type="object",
+                 *                     nullable=true,
+                 *                     @OA\Property(property="id", type="integer", example=1),
+                 *                     @OA\Property(property="gate_code", type="string", example="GATE-001"),
+                 *                     @OA\Property(property="gate_type", type="string", enum={"entrance", "exit", "both"}, example="entrance"),
+                 *                     @OA\Property(property="position_x", type="number", format="float", nullable=true),
+                 *                     @OA\Property(property="position_y", type="number", format="float", nullable=true),
+                 *                     @OA\Property(property="is_active", type="boolean", example=true)
+                 *                 ),
+                 *                 @OA\Property(
+                 *                     property="parking_lot",
+                 *                     type="object",
+                 *                     nullable=true,
+                 *                     @OA\Property(property="id", type="integer", example=1),
+                 *                     @OA\Property(property="name", type="string", example="Tầng hầm B1"),
+                 *                     @OA\Property(property="gate_pos_x", type="number", nullable=true, example=10.806176400733),
+                 *                     @OA\Property(property="gate_pos_y", type="number", nullable=true, example=106.62866765108)
+                 *                 ),
+                 *                 @OA\Property(
+                 *                     property="user_snapshot",
      *                     type="object",
      *                     @OA\Property(property="id", type="integer", example=12),
      *                     @OA\Property(property="name", type="string", example="Nguyễn Văn A"),
@@ -884,20 +892,51 @@ class ReservationController extends Controller
      */
     public function show($id)
     {
-        $reservation = Reservation::with(['slot.parkingLot', 'reservationRequest.gate', 'payment'])->findOrFail($id);
+        $reservation = Reservation::with(['slot.parkingLot', 'reservationRequest.gate', 'reservationRequest.parkingLot', 'payment'])->findOrFail($id);
 
-        // Transform để đưa gate ra cùng cấp với reservation_request
+        // Transform để đưa gate và parking_lot ra cùng cấp với reservation
         $data = $reservation->toArray();
         
-        // Tách gate ra khỏi reservation_request và đặt ở cùng cấp
+        // ✅ Tách gate ra khỏi reservation_request và đặt ở cùng cấp
+        $gate = null;
         if (isset($data['reservation_request']['gate'])) {
-            $data['gate'] = $data['reservation_request']['gate'];
+            $gate = $data['reservation_request']['gate'];
+            $data['gate'] = $gate;
             unset($data['reservation_request']['gate']);
+        }
+
+        // ✅ Lấy thông tin parking lot: từ slot nếu có, nếu không thì từ reservation_request
+        $parkingLot = null;
+        if (isset($data['slot']['parking_lot']) && $data['slot']['parking_lot']) {
+            $parkingLot = $data['slot']['parking_lot'];
+        } elseif (isset($data['reservation_request']['parking_lot']) && $data['reservation_request']['parking_lot']) {
+            $parkingLot = $data['reservation_request']['parking_lot'];
+        }
+
+        // ✅ Đưa parking_lot ra cùng cấp với reservation
+        if ($parkingLot) {
+            $data['parking_lot'] = $parkingLot;
+        }
+
+        // ✅ Lấy khoảng cách từ slot đến cổng (nếu có slot và gate)
+        $distanceFromGate = null;
+        if (isset($data['slot']['id']) && $gate && isset($gate['id'])) {
+            $slotGateDistance = SlotGateDistance::where('slot_id', $data['slot']['id'])
+                ->where('gate_id', $gate['id'])
+                ->first();
+            
+            if ($slotGateDistance) {
+                $distanceFromGate = (float) $slotGateDistance->distance;
+            }
+        }
+        
+        // ✅ Thêm khoảng cách vào response
+        if ($distanceFromGate !== null) {
+            $data['distance_from_gate_meters'] = $distanceFromGate;
         }
 
         return response()->json([
             'success' => true,
-            'message' => 'Check-out thành công',
             'data' => $data
         ]);
     }
@@ -951,6 +990,14 @@ class ReservationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Chỉ có thể check-in reservation đang confirmed'
+            ], 422);
+        }
+
+        // ✅ Kiểm tra reservation đã có slot chưa
+        if ($reservation->slot_id === null) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reservation chưa được gán slot. Vui lòng sử dụng endpoint demo/check-in với gate_id để cấp chỗ và check-in.'
             ], 422);
         }
 
@@ -1274,28 +1321,76 @@ class ReservationController extends Controller
      * @OA\Post(
      *     path="/reservations/demo/check-in",
      *     tags={"🎫 Reservations"},
-     *     summary="Demo check-in bằng reservation_code",
-     *     description="Check-in bằng reservation_code thay vì ID, dễ demo hơn. Chỉ áp dụng khi reservation đang confirmed.",
+     *     summary="Demo check-in bằng reservation_code và gate_id",
+     *     description="Check-in bằng reservation_code và gate_id. Lúc này mới chạy thuật toán cấp chỗ và gán slot cho reservation. Chỉ áp dụng khi reservation đang confirmed và chưa có slot.",
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
-     *             required={"reservation_code"},
-     *             @OA\Property(property="reservation_code", type="string", example="RES-AB12CD34-20251019")
+     *             required={"reservation_code", "gate_id"},
+     *             @OA\Property(property="reservation_code", type="string", example="RES-AB12CD34-20251019"),
+     *             @OA\Property(property="gate_id", type="integer", example=1, description="ID cổng vào")
      *         )
      *     ),
-     *     @OA\Response(response=200, description="Check-in thành công"),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Check-in thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string", example="Check-in thành công"),
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="object",
+     *                 @OA\Property(property="reservation", type="object"),
+     *                 @OA\Property(
+     *                     property="parking_lot",
+     *                     type="object",
+     *                     nullable=true,
+     *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="name", type="string", example="Tầng hầm B1"),
+     *                     @OA\Property(property="gate_pos_x", type="number", nullable=true, example=10.806176400733),
+     *                     @OA\Property(property="gate_pos_y", type="number", nullable=true, example=106.62866765108)
+     *                 ),
+     *                 @OA\Property(
+     *                     property="allocated_slot",
+     *                     type="object",
+     *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="slot_code", type="string", example="MB-001"),
+     *                     @OA\Property(property="vehicle_type", type="string", example="motorbike"),
+     *                     @OA\Property(property="status", type="string", example="occupied"),
+     *                     @OA\Property(property="position_x", type="number", example=10.806176400733),
+     *                     @OA\Property(property="position_y", type="number", example=106.62866765108)
+     *                 ),
+     *                 @OA\Property(
+     *                     property="gate",
+     *                     type="object",
+     *                     nullable=true,
+     *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="gate_code", type="string", example="GATE-001"),
+     *                     @OA\Property(property="gate_type", type="string", enum={"entrance", "exit", "both"}, example="entrance"),
+     *                     @OA\Property(property="position_x", type="number", example=10.806176400733),
+     *                     @OA\Property(property="position_y", type="number", example=106.62866765108),
+     *                     @OA\Property(property="is_active", type="boolean", example=true)
+     *                 ),
+     *                 @OA\Property(property="distance_from_gate_meters", type="number", nullable=true, example=25.5, description="Khoảng cách từ slot đến cổng (mét)"),
+     *                 @OA\Property(property="algorithm_used", type="string", example="priority_queue"),
+     *                 @OA\Property(property="processing_time_ms", type="number", example=302.5)
+     *             )
+     *         )
+     *     ),
      *     @OA\Response(response=404, description="Không tìm thấy reservation"),
-     *     @OA\Response(response=422, description="Không thể check-in do không đúng trạng thái")
+     *     @OA\Response(response=422, description="Không thể check-in do không đúng trạng thái hoặc không có chỗ trống")
      * )
      */
     public function demoCheckIn(Request $request)
     {
         $validated = $request->validate([
-            'reservation_code' => 'required|string'
+            'reservation_code' => 'required|string',
+            'gate_id' => 'required|integer|exists:gates,id'
         ]);
 
         // ✅ Trim và uppercase để đảm bảo format đúng
         $reservationCode = strtoupper(trim($validated['reservation_code']));
+        $gateId = (int) $validated['gate_id'];
 
         $reservation = Reservation::where('reservation_code', $reservationCode)->first();
 
@@ -1327,78 +1422,191 @@ class ReservationController extends Controller
             ], 422);
         }
 
-        // ✅ Cập nhật reservation trực tiếp (không gọi checkIn())
-        $reservation->update([
-            'status' => 'checked_in',
-            'check_in_at' => now()
-        ]);
-
-        // ✅ Slot chuyển sang occupied
-        $reservation->slot->update(['status' => 'occupied']);
-
-        // ✅ Reload reservation để lấy dữ liệu mới nhất
-        $reservation->refresh();
-
-        // ✅ Kiểm tra monthly pass sau khi check-in
-        $monthlyPass = MonthlyPass::findValidPass(
-            $reservation->user_id,
-            $reservation->vehicle_id,
-            $reservation->slot->parking_lot_id,
-            $reservation->check_in_at ? $reservation->check_in_at->toDateString() : null
-        );
-
-        $hasMonthlyPass = $monthlyPass && $monthlyPass->isValid($reservation->check_in_at);
-
-        $responseData = [
-            'reservation' => $reservation,
-        ];
-
-        // ✅ Nếu có monthly pass, tạo checkout code ngay
-        if ($hasMonthlyPass) {
-            // Tạo Payment với amount = 0 (miễn phí)
-            $payment = Payment::create([
-                'order_id' => $reservation->reservation_code,
-                'reservation_id' => $reservation->id,
-                'amount' => 0,
-                'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
-                'status' => 'PAID', // Tự động PAID vì có monthly pass
-                'paid_at' => now(),
-                'meta' => [
-                    'payment_method' => 'monthly_pass',
-                    'monthly_pass_id' => $monthlyPass->id,
-                    'is_free' => true,
-                ],
-            ]);
-
-            // Cập nhật reservation với payment_id
-            $reservation->update(['payment_id' => $payment->id]);
-
-            // Tạo checkout code
-            $checkoutCode = $this->createCheckoutCode($reservation, $payment);
-
-            // Thêm thông tin checkout code vào response
-            $responseData['checkout_code'] = [
-                'checkout_code' => $checkoutCode->checkout_code,
-                'status' => $checkoutCode->status,
-                'expires_at' => $checkoutCode->expires_at?->toIso8601String(),
-                'qr_data' => $checkoutCode->checkout_code,
-            ];
-            $responseData['monthly_pass'] = [
-                'id' => $monthlyPass->id,
-                'order_id' => $monthlyPass->order_id,
-                'end_date' => $monthlyPass->end_date?->toDateString(),
-            ];
-            $responseData['is_free'] = true;
-            $responseData['skip_payment'] = true; // Flag để frontend biết bỏ qua bước thanh toán
+        // ✅ Kiểm tra reservation chưa có slot (chưa được gán chỗ)
+        if ($reservation->slot_id !== null) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reservation đã được gán slot. Không thể chạy lại thuật toán cấp chỗ.'
+            ], 422);
         }
 
-        return response()->json([
-            'success' => true,
-            'message' => $hasMonthlyPass
-                ? 'Check-in thành công. Vé tháng của bạn đã được áp dụng. Vui lòng quét mã checkout khi ra khỏi bãi đỗ.'
-                : 'Check-in thành công',
-            'data' => $responseData
-        ]);
+        return DB::transaction(function () use ($reservation, $gateId) {
+            // 1. Lấy reservation request
+            $reservationRequest = $reservation->reservationRequest;
+            
+            if (!$reservationRequest) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không tìm thấy reservation request'
+                ], 422);
+            }
+
+            // 2. Cập nhật reservation request với gate_id
+            $reservationRequest->update([
+                'gate_id' => $gateId
+            ]);
+
+            // 3. Chạy thuật toán cấp chỗ với gate_id
+            $allocatedSlot = PriorityQueueSlotAllocationService::allocateSlot($reservationRequest);
+
+            if (!$allocatedSlot) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không có chỗ trống phù hợp với loại xe này tại cổng này'
+                ], 422);
+            }
+
+            // 4. Final guard: kiểm tra chồng lấn lần cuối
+            $start = Carbon::parse($reservation->start_time)->utc();
+            $end = Carbon::parse($reservation->end_time)->utc();
+            
+            if (TimeOverlapService::hasOverlapOnSlot($allocatedSlot->id, $start, $end)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Khung giờ đã bị trùng, vui lòng thử lại'
+                ], 422);
+            }
+
+            // 5. Gán slot cho reservation
+            $reservation->update([
+                'slot_id' => $allocatedSlot->id
+            ]);
+
+            // 6. Cập nhật reservation request status → assigned
+            $reservationRequest->update(['status' => 'assigned']);
+
+            // 7. Check-in: cập nhật status và check_in_at
+            $reservation->update([
+                'status' => 'checked_in',
+                'check_in_at' => now()
+            ]);
+
+            // 8. Slot chuyển sang occupied
+            $allocatedSlot->update(['status' => 'occupied']);
+
+            // ✅ Reload reservation để lấy dữ liệu mới nhất
+            $reservation->refresh();
+            $reservation->load(['slot.parkingLot', 'reservationRequest.gate']);
+
+            // ✅ Lấy thông tin gate
+            $gate = $reservationRequest->gate;
+            
+            // ✅ Lấy thông tin parking lot
+            $parkingLot = $allocatedSlot->parkingLot;
+            
+            // ✅ Lấy khoảng cách từ slot đến cổng
+            $distanceFromGate = null;
+            if ($gate && $allocatedSlot) {
+                $slotGateDistance = SlotGateDistance::where('slot_id', $allocatedSlot->id)
+                    ->where('gate_id', $gate->id)
+                    ->first();
+                
+                if ($slotGateDistance) {
+                    $distanceFromGate = (float) $slotGateDistance->distance;
+                }
+            }
+
+            // ✅ Kiểm tra monthly pass sau khi check-in
+            $monthlyPass = MonthlyPass::findValidPass(
+                $reservation->user_id,
+                $reservation->vehicle_id,
+                $allocatedSlot->parking_lot_id,
+                $reservation->check_in_at ? $reservation->check_in_at->toDateString() : null
+            );
+
+            $hasMonthlyPass = $monthlyPass && $monthlyPass->isValid($reservation->check_in_at);
+
+            // ✅ Chuẩn bị thông tin slot chi tiết
+            $slotInfo = [
+                'id' => $allocatedSlot->id,
+                'slot_code' => $allocatedSlot->slot_code,
+                'vehicle_type' => $allocatedSlot->vehicle_type,
+                'status' => $allocatedSlot->status,
+                'position_x' => $allocatedSlot->position_x,
+                'position_y' => $allocatedSlot->position_y,
+            ];
+
+            // ✅ Chuẩn bị thông tin gate chi tiết
+            $gateInfo = null;
+            if ($gate) {
+                $gateInfo = [
+                    'id' => $gate->id,
+                    'gate_code' => $gate->gate_code,
+                    'gate_type' => $gate->gate_type,
+                    'position_x' => $gate->position_x,
+                    'position_y' => $gate->position_y,
+                    'is_active' => $gate->is_active,
+                ];
+            }
+
+            // ✅ Chuẩn bị thông tin parking lot chi tiết
+            $parkingLotInfo = null;
+            if ($parkingLot) {
+                $parkingLotInfo = [
+                    'id' => $parkingLot->id,
+                    'name' => $parkingLot->name,
+                    'gate_pos_x' => $parkingLot->gate_pos_x,
+                    'gate_pos_y' => $parkingLot->gate_pos_y,
+                ];
+            }
+
+            $responseData = [
+                'reservation' => $reservation,
+                'parking_lot' => $parkingLotInfo,
+                'allocated_slot' => $slotInfo,
+                'gate' => $gateInfo,
+                'distance_from_gate_meters' => $distanceFromGate,
+                'algorithm_used' => 'priority_queue',
+                'processing_time_ms' => $reservationRequest->processing_time_ms,
+            ];
+
+            // ✅ Nếu có monthly pass, tạo checkout code ngay
+            if ($hasMonthlyPass) {
+                // Tạo Payment với amount = 0 (miễn phí)
+                $payment = Payment::create([
+                    'order_id' => $reservation->reservation_code,
+                    'reservation_id' => $reservation->id,
+                    'amount' => 0,
+                    'txn_ref' => 'ORD' . now()->format('YmdHis') . rand(100, 999),
+                    'status' => 'PAID', // Tự động PAID vì có monthly pass
+                    'paid_at' => now(),
+                    'meta' => [
+                        'payment_method' => 'monthly_pass',
+                        'monthly_pass_id' => $monthlyPass->id,
+                        'is_free' => true,
+                    ],
+                ]);
+
+                // Cập nhật reservation với payment_id
+                $reservation->update(['payment_id' => $payment->id]);
+
+                // Tạo checkout code
+                $checkoutCode = $this->createCheckoutCode($reservation, $payment);
+
+                // Thêm thông tin checkout code vào response
+                $responseData['checkout_code'] = [
+                    'checkout_code' => $checkoutCode->checkout_code,
+                    'status' => $checkoutCode->status,
+                    'expires_at' => $checkoutCode->expires_at?->toIso8601String(),
+                    'qr_data' => $checkoutCode->checkout_code,
+                ];
+                $responseData['monthly_pass'] = [
+                    'id' => $monthlyPass->id,
+                    'order_id' => $monthlyPass->order_id,
+                    'end_date' => $monthlyPass->end_date?->toDateString(),
+                ];
+                $responseData['is_free'] = true;
+                $responseData['skip_payment'] = true; // Flag để frontend biết bỏ qua bước thanh toán
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $hasMonthlyPass
+                    ? 'Check-in thành công. Vé tháng của bạn đã được áp dụng. Vui lòng quét mã checkout khi ra khỏi bãi đỗ.'
+                    : 'Check-in thành công',
+                'data' => $responseData
+            ]);
+        });
     }
 
     /**
@@ -1482,8 +1690,10 @@ class ReservationController extends Controller
                 'status' => 'checked_out',
             ]);
 
-            // Giải phóng slot
-            $reservation->slot->update(['status' => 'available']);
+            // ✅ Giải phóng slot (chỉ khi có slot)
+            if ($reservation->slot_id !== null && $reservation->slot) {
+                $reservation->slot->update(['status' => 'available']);
+            }
 
             // Finalize request
             $this->finalizeRequestIfAny($reservation);
@@ -1739,7 +1949,7 @@ class ReservationController extends Controller
      */
     public function getUserHistory(Request $request, $userId)
     {
-        $query = Reservation::with(['slot.parkingLot', 'reservationRequest.gate'])
+        $query = Reservation::with(['slot.parkingLot', 'reservationRequest.gate', 'reservationRequest.parkingLot'])
             ->where('user_id', $userId);
 
         // Filter theo status
@@ -1775,13 +1985,45 @@ class ReservationController extends Controller
             // Thêm payment vào reservation
             $reservation->payment = $payment;
 
-            // Transform để đưa gate ra cùng cấp với reservation_request
+            // Transform để đưa gate và parking_lot ra cùng cấp với reservation
             $data = $reservation->toArray();
             
             // Tách gate ra khỏi reservation_request và đặt ở cùng cấp
+            $gate = null;
             if (isset($data['reservation_request']['gate'])) {
-                $data['gate'] = $data['reservation_request']['gate'];
+                $gate = $data['reservation_request']['gate'];
+                $data['gate'] = $gate;
                 unset($data['reservation_request']['gate']);
+            }
+
+            // ✅ Lấy thông tin parking lot: từ slot nếu có, nếu không thì từ reservation_request
+            $parkingLot = null;
+            if (isset($data['slot']['parking_lot']) && $data['slot']['parking_lot']) {
+                $parkingLot = $data['slot']['parking_lot'];
+            } elseif (isset($data['reservation_request']['parking_lot']) && $data['reservation_request']['parking_lot']) {
+                $parkingLot = $data['reservation_request']['parking_lot'];
+            }
+
+            // ✅ Đưa parking_lot ra cùng cấp với reservation
+            if ($parkingLot) {
+                $data['parking_lot'] = $parkingLot;
+            }
+
+            // ✅ Lấy khoảng cách từ slot đến cổng (nếu có slot và gate)
+            $distanceFromGate = null;
+            if (isset($data['slot']['id']) && $gate && isset($gate['id'])) {
+                $slotGateDistance = SlotGateDistance::where('slot_id', $data['slot']['id'])
+                    ->where('gate_id', $gate['id'])
+                    ->first();
+                
+                if ($slotGateDistance) {
+                    $distanceFromGate = (float) $slotGateDistance->distance;
+                }
+            }
+            
+            // ✅ Thêm khoảng cách vào response
+            if ($distanceFromGate !== null) {
+                $data['distance_from_gate_meters'] = $distanceFromGate;
             }
             
             return $data;
@@ -1877,6 +2119,65 @@ class ReservationController extends Controller
                     'processed_at' => now(),
                 ]);
         }
+    }
+
+    /**
+     * Kiểm tra số slot available cho loại xe trong khung giờ cụ thể
+     * Bao gồm cả các reservation có slot_id = null (giữ chỗ không cụ thể)
+     * 
+     * @param int $parkingLotId
+     * @param string $vehicleType
+     * @param Carbon $startTime
+     * @param Carbon $endTime
+     * @return int Số slot còn trống
+     */
+    private function checkAvailableSlotsForReservation(int $parkingLotId, string $vehicleType, Carbon $startTime, Carbon $endTime): int
+    {
+        // 1. Tổng số slot cho loại xe này
+        $totalSlots = \App\Models\ParkingSlot::where('parking_lot_id', $parkingLotId)
+            ->where('vehicle_type', $vehicleType)
+            ->count();
+
+        // 2. Đếm số slot đã được gán cụ thể (có slot_id) và overlap thời gian
+        $assignedSlotIds = Reservation::whereHas('slot', function ($q) use ($parkingLotId, $vehicleType) {
+                $q->where('parking_lot_id', $parkingLotId)
+                    ->where('vehicle_type', $vehicleType);
+            })
+            ->whereIn('status', ['confirmed', 'checked_in'])
+            ->where(function ($q) use ($startTime, $endTime) {
+                // Overlap: existing.end > new.start AND existing.start < new.end
+                $q->where('end_time', '>', $startTime)
+                    ->where('start_time', '<', $endTime);
+            })
+            ->whereNotNull('slot_id')
+            ->pluck('slot_id')
+            ->unique()
+            ->count();
+
+        // 3. Đếm số reservation đang giữ chỗ không cụ thể (slot_id = null) và overlap thời gian
+        // Mỗi reservation này "giữ" 1 slot (không cụ thể)
+        $heldSlotsCount = Reservation::whereNull('slot_id')
+            ->whereIn('status', ['confirmed'])
+            ->whereHas('reservationRequest', function ($q) use ($parkingLotId, $vehicleType) {
+                $q->where('parking_lot_id', $parkingLotId)
+                    ->where('vehicle_type', $vehicleType);
+            })
+            ->where(function ($q) use ($startTime, $endTime) {
+                // Overlap: existing.end > new.start AND existing.start < new.end
+                $q->where('end_time', '>', $startTime)
+                    ->where('start_time', '<', $endTime);
+            })
+            ->where(function ($q) {
+                // Chỉ tính các reservation chưa hết hạn giữ chỗ (expires_at >= now hoặc null)
+                $q->where('expires_at', '>=', now())
+                    ->orWhereNull('expires_at');
+            })
+            ->count();
+
+        // 4. Tính số slot còn trống
+        $availableSlots = $totalSlots - $assignedSlotIds - $heldSlotsCount;
+
+        return max(0, $availableSlots);
     }
 
     /**
