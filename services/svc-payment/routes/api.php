@@ -54,6 +54,7 @@ Route::prefix('reservations')->group(function () {
     // Checkout QR code APIs
     Route::post('/demo/check-in', [ReservationController::class, 'demoCheckIn']);
     Route::post('/demo/check-out', [ReservationController::class, 'demoCheckOut']);
+    Route::post('/demo/check-out/confirm', [ReservationController::class, 'confirmDemoCheckOut']); // Xác nhận thanh toán offline
     Route::post('/expire-due', [ReservationController::class, 'expireDue']);
     Route::post('/scan-checkout', [ReservationController::class, 'scanCheckoutCode']); // Quét QR checkout code
 

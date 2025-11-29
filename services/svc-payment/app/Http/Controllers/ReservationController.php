@@ -186,10 +186,10 @@ class ReservationController extends Controller
                 $q->whereHas('slot', function ($slotQuery) use ($request) {
                     $slotQuery->where('vehicle_type', $request->vehicle_type);
                 })
-                // Nếu chưa có slot → filter qua reservation_request
-                ->orWhereHas('reservationRequest', function ($requestQuery) use ($request) {
-                    $requestQuery->where('vehicle_type', $request->vehicle_type);
-                });
+                    // Nếu chưa có slot → filter qua reservation_request
+                    ->orWhereHas('reservationRequest', function ($requestQuery) use ($request) {
+                        $requestQuery->where('vehicle_type', $request->vehicle_type);
+                    });
             });
         }
 
@@ -206,10 +206,10 @@ class ReservationController extends Controller
                 $q->whereHas('slot', function ($slotQuery) use ($parkingLotId) {
                     $slotQuery->where('parking_lot_id', $parkingLotId);
                 })
-                // Nếu chưa có slot → filter qua reservation_request.parking_lot_id
-                ->orWhereHas('reservationRequest', function ($requestQuery) use ($parkingLotId) {
-                    $requestQuery->where('parking_lot_id', $parkingLotId);
-                });
+                    // Nếu chưa có slot → filter qua reservation_request.parking_lot_id
+                    ->orWhereHas('reservationRequest', function ($requestQuery) use ($parkingLotId) {
+                        $requestQuery->where('parking_lot_id', $parkingLotId);
+                    });
             });
         }
 
@@ -230,7 +230,7 @@ class ReservationController extends Controller
 
         // Summary statistics (áp dụng cùng filter với query chính)
         $summaryQuery = Reservation::query();
-        
+
         // Áp dụng filter parking_lot_id cho summary nếu có
         if ($request->filled('parking_lot_id')) {
             $parkingLotId = (int) $request->parking_lot_id;
@@ -238,12 +238,12 @@ class ReservationController extends Controller
                 $q->whereHas('slot', function ($slotQuery) use ($parkingLotId) {
                     $slotQuery->where('parking_lot_id', $parkingLotId);
                 })
-                ->orWhereHas('reservationRequest', function ($requestQuery) use ($parkingLotId) {
-                    $requestQuery->where('parking_lot_id', $parkingLotId);
-                });
+                    ->orWhereHas('reservationRequest', function ($requestQuery) use ($parkingLotId) {
+                        $requestQuery->where('parking_lot_id', $parkingLotId);
+                    });
             });
         }
-        
+
         $summary = [
             'total_reservations' => (clone $summaryQuery)->count(),
             'confirmed' => (clone $summaryQuery)->where('status', 'confirmed')->count(),
@@ -257,7 +257,7 @@ class ReservationController extends Controller
         // Transform reservations để đưa gate và parking_lot ra cùng cấp với reservation
         $transformedReservations = $reservations->getCollection()->map(function ($reservation) {
             $data = $reservation->toArray();
-            
+
             // Tách gate ra khỏi reservation_request và đặt ở cùng cấp
             $gate = null;
             if (isset($data['reservation_request']['gate'])) {
@@ -285,17 +285,17 @@ class ReservationController extends Controller
                 $slotGateDistance = SlotGateDistance::where('slot_id', $data['slot']['id'])
                     ->where('gate_id', $gate['id'])
                     ->first();
-                
+
                 if ($slotGateDistance) {
                     $distanceFromGate = (float) $slotGateDistance->distance;
                 }
             }
-            
+
             // ✅ Thêm khoảng cách vào response
             if ($distanceFromGate !== null) {
                 $data['distance_from_gate_meters'] = $distanceFromGate;
             }
-            
+
             return $data;
         });
 
@@ -503,10 +503,10 @@ class ReservationController extends Controller
                 // ✅ Kiểm tra monthly pass
                 $start = Carbon::parse($desiredStart)->utc();
                 $end = $start->copy()->addMinutes($duration);
-                
+
                 // ✅ KIỂM TRA VÀ GIỮ CHỖ: Đảm bảo còn slot trống cho loại xe này
                 $availableSlots = $this->checkAvailableSlotsForReservation($parkingLotId, $vehicleType, $start, $end);
-                
+
                 if ($availableSlots <= 0) {
                     return response()->json([
                         'success' => false,
@@ -838,28 +838,28 @@ class ReservationController extends Controller
      *                     @OA\Property(property="processing_time_ms", type="number", example=12.35),
      *                     @OA\Property(property="gate_id", type="integer", example=1)
      *                 ),
-                 *                 @OA\Property(
-                 *                     property="gate",
-                 *                     type="object",
-                 *                     nullable=true,
-                 *                     @OA\Property(property="id", type="integer", example=1),
-                 *                     @OA\Property(property="gate_code", type="string", example="GATE-001"),
-                 *                     @OA\Property(property="gate_type", type="string", enum={"entrance", "exit", "both"}, example="entrance"),
-                 *                     @OA\Property(property="position_x", type="number", format="float", nullable=true),
-                 *                     @OA\Property(property="position_y", type="number", format="float", nullable=true),
-                 *                     @OA\Property(property="is_active", type="boolean", example=true)
-                 *                 ),
-                 *                 @OA\Property(
-                 *                     property="parking_lot",
-                 *                     type="object",
-                 *                     nullable=true,
-                 *                     @OA\Property(property="id", type="integer", example=1),
-                 *                     @OA\Property(property="name", type="string", example="Tầng hầm B1"),
-                 *                     @OA\Property(property="gate_pos_x", type="number", nullable=true, example=10.806176400733),
-                 *                     @OA\Property(property="gate_pos_y", type="number", nullable=true, example=106.62866765108)
-                 *                 ),
-                 *                 @OA\Property(
-                 *                     property="user_snapshot",
+     *                 @OA\Property(
+     *                     property="gate",
+     *                     type="object",
+     *                     nullable=true,
+     *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="gate_code", type="string", example="GATE-001"),
+     *                     @OA\Property(property="gate_type", type="string", enum={"entrance", "exit", "both"}, example="entrance"),
+     *                     @OA\Property(property="position_x", type="number", format="float", nullable=true),
+     *                     @OA\Property(property="position_y", type="number", format="float", nullable=true),
+     *                     @OA\Property(property="is_active", type="boolean", example=true)
+     *                 ),
+     *                 @OA\Property(
+     *                     property="parking_lot",
+     *                     type="object",
+     *                     nullable=true,
+     *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="name", type="string", example="Tầng hầm B1"),
+     *                     @OA\Property(property="gate_pos_x", type="number", nullable=true, example=10.806176400733),
+     *                     @OA\Property(property="gate_pos_y", type="number", nullable=true, example=106.62866765108)
+     *                 ),
+     *                 @OA\Property(
+     *                     property="user_snapshot",
      *                     type="object",
      *                     @OA\Property(property="id", type="integer", example=12),
      *                     @OA\Property(property="name", type="string", example="Nguyễn Văn A"),
@@ -896,7 +896,7 @@ class ReservationController extends Controller
 
         // Transform để đưa gate và parking_lot ra cùng cấp với reservation
         $data = $reservation->toArray();
-        
+
         // ✅ Tách gate ra khỏi reservation_request và đặt ở cùng cấp
         $gate = null;
         if (isset($data['reservation_request']['gate'])) {
@@ -924,12 +924,12 @@ class ReservationController extends Controller
             $slotGateDistance = SlotGateDistance::where('slot_id', $data['slot']['id'])
                 ->where('gate_id', $gate['id'])
                 ->first();
-            
+
             if ($slotGateDistance) {
                 $distanceFromGate = (float) $slotGateDistance->distance;
             }
         }
-        
+
         // ✅ Thêm khoảng cách vào response
         if ($distanceFromGate !== null) {
             $data['distance_from_gate_meters'] = $distanceFromGate;
@@ -1433,7 +1433,7 @@ class ReservationController extends Controller
         return DB::transaction(function () use ($reservation, $gateId) {
             // 1. Lấy reservation request
             $reservationRequest = $reservation->reservationRequest;
-            
+
             if (!$reservationRequest) {
                 return response()->json([
                     'success' => false,
@@ -1459,7 +1459,7 @@ class ReservationController extends Controller
             // 4. Final guard: kiểm tra chồng lấn lần cuối
             $start = Carbon::parse($reservation->start_time)->utc();
             $end = Carbon::parse($reservation->end_time)->utc();
-            
+
             if (TimeOverlapService::hasOverlapOnSlot($allocatedSlot->id, $start, $end)) {
                 return response()->json([
                     'success' => false,
@@ -1490,17 +1490,17 @@ class ReservationController extends Controller
 
             // ✅ Lấy thông tin gate
             $gate = $reservationRequest->gate;
-            
+
             // ✅ Lấy thông tin parking lot
             $parkingLot = $allocatedSlot->parkingLot;
-            
+
             // ✅ Lấy khoảng cách từ slot đến cổng
             $distanceFromGate = null;
             if ($gate && $allocatedSlot) {
                 $slotGateDistance = SlotGateDistance::where('slot_id', $allocatedSlot->id)
                     ->where('gate_id', $gate->id)
                     ->first();
-                
+
                 if ($slotGateDistance) {
                     $distanceFromGate = (float) $slotGateDistance->distance;
                 }
@@ -1614,7 +1614,7 @@ class ReservationController extends Controller
      *     path="/reservations/demo/check-out",
      *     tags={"🎫 Reservations"},
      *     summary="Demo check-out bằng reservation_code",
-     *     description="Check-out bằng reservation_code thay vì ID, dễ demo hơn. Chỉ áp dụng khi reservation đang checked_in.",
+     *     description="Check-out bằng reservation_code. Xử lý 2 trường hợp: checked_in (tạo payment) và pending_checkout (finalize checkout). Đối với offline payment ở pending_checkout, hiển thị số tiền và chờ xác nhận.",
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
@@ -1625,19 +1625,19 @@ class ReservationController extends Controller
      *     ),
      *     @OA\Response(
      *         response=200,
-     *         description="Check-out thành công",
+     *         description="Check-out thành công hoặc yêu cầu xác nhận thanh toán",
      *         @OA\JsonContent(
      *             @OA\Property(property="success", type="boolean", example=true),
-     *             @OA\Property(property="message", type="string", example="Check-out thành công"),
+     *             @OA\Property(property="message", type="string", example="Đã quét QR thành công. Vui lòng xác nhận thanh toán để hoàn tất checkout."),
      *             @OA\Property(property="data", type="object",
-     *                 @OA\Property(property="reservation", type="object",
-     *                     @OA\Property(property="id", type="integer", example=101),
-     *                     @OA\Property(property="status", type="string", example="pending_checkout"),
-     *                     @OA\Property(property="check_out_at", type="string", format="date-time", example="2025-10-19T17:45:00Z")
-     *                 ),
+     *                 @OA\Property(property="reservation", type="object"),
      *                 @OA\Property(property="payment", type="object"),
      *                 @OA\Property(property="amount", type="integer", example=50000),
-     *                 @OA\Property(property="payment_method", type="string", example="online")
+     *                 @OA\Property(property="amount_formatted", type="string", example="50.000 VNĐ"),
+     *                 @OA\Property(property="payment_method", type="string", example="offline"),
+     *                 @OA\Property(property="checked_out", type="boolean", example=false),
+     *                 @OA\Property(property="requires_confirmation", type="boolean", example=true, description="Flag để frontend biết cần hiển thị nút xác nhận"),
+     *                 @OA\Property(property="confirmation_endpoint", type="string", example="/reservations/demo/check-out/confirm")
      *             )
      *         )
      *     ),
@@ -1649,7 +1649,7 @@ class ReservationController extends Controller
     {
         $validated = $request->validate([
             'reservation_code' => 'required|string',
-            'payment_method' => 'nullable|string|in:online,offline' // payment_method
+            'payment_method' => 'nullable|string|in:online,offline'
         ]);
 
         $reservation = Reservation::where('reservation_code', $validated['reservation_code'])->first();
@@ -1661,41 +1661,84 @@ class ReservationController extends Controller
             ], 404);
         }
 
-        //  pending_checkout → finalize checkout
+        // ✅ pending_checkout → xử lý theo payment method
         if ($reservation->status === 'pending_checkout') {
-            // Kiểm tra payment đã PAID chưa (cho online payment)
             $payment = $reservation->payment;
-            if ($payment) {
-                $paymentMethod = is_array($payment->meta) ? ($payment->meta['payment_method'] ?? null) : null;
 
-                // Nếu là offline payment và chưa PAID → cập nhật thành PAID
-                if ($paymentMethod === 'offline' && $payment->status !== 'PAID') {
-                    $payment->update([
-                        'status' => 'PAID',
-                        'paid_at' => now()
-                    ]);
-                }
-
-                // Kiểm tra online payment phải đã PAID
-                if ($paymentMethod === 'online' && $payment->status !== 'PAID') {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Payment chưa được thanh toán thành công. Không thể finalize checkout.'
-                    ], 422);
-                }
+            if (!$payment) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không tìm thấy thông tin thanh toán cho reservation này'
+                ], 422);
             }
 
-            // Finalize checkout: pending_checkout → checked_out
+            $paymentMethod = is_array($payment->meta) ? ($payment->meta['payment_method'] ?? null) : null;
+
+            // ✅ Nếu là offline payment và chưa PAID → hiển thị số tiền, chờ xác nhận
+            if ($paymentMethod === 'offline' && $payment->status !== 'PAID') {
+                // Lưu thông tin đã quét QR
+                $existingMeta = is_array($payment->meta) ? $payment->meta : [];
+                $payment->update([
+                    'meta' => array_merge($existingMeta, [
+                        'qr_scanned_at' => now()->toIso8601String(),
+                        'qr_scanned' => true,
+                    ]),
+                ]);
+                $payment->refresh();
+
+                // Load thông tin đầy đủ
+                $reservation->load(['slot.parkingLot', 'reservationRequest.gate']);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Đã quét QR thành công. Vui lòng xác nhận thanh toán để hoàn tất checkout.',
+                    'data' => [
+                        'reservation' => [
+                            'id' => $reservation->id,
+                            'reservation_code' => $reservation->reservation_code,
+                            'status' => $reservation->status,
+                            'check_in_at' => $reservation->check_in_at?->toIso8601String(),
+                            'check_out_at' => $reservation->check_out_at?->toIso8601String(),
+                            'vehicle_snapshot' => $reservation->vehicle_snapshot,
+                            'user_snapshot' => $reservation->user_snapshot,
+                        ],
+                        'payment' => [
+                            'id' => $payment->id,
+                            'order_id' => $payment->order_id,
+                            'amount' => $payment->amount,
+                            'status' => $payment->status,
+                            'txn_ref' => $payment->txn_ref,
+                            'created_at' => $payment->created_at?->toIso8601String(),
+                        ],
+                        'payment_method' => $paymentMethod,
+                        'amount' => $payment->amount,
+                        'amount_formatted' => number_format($payment->amount, 0, ',', '.') . ' VNĐ',
+                        'payment_status' => $payment->status,
+                        'checked_out' => false,
+                        'requires_confirmation' => true,
+                        'confirmation_endpoint' => '/reservations/demo/check-out/confirm',
+                    ]
+                ]);
+            }
+
+            // ✅ Online payment: Kiểm tra đã PAID chưa
+            if ($paymentMethod === 'online' && $payment->status !== 'PAID') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Payment chưa được thanh toán thành công. Không thể finalize checkout.',
+                    'payment_status' => $payment->status
+                ], 422);
+            }
+
+            // ✅ Đã PAID → finalize checkout
             $reservation->update([
                 'status' => 'checked_out',
             ]);
 
-            // ✅ Giải phóng slot (chỉ khi có slot)
             if ($reservation->slot_id !== null && $reservation->slot) {
                 $reservation->slot->update(['status' => 'available']);
             }
 
-            // Finalize request
             $this->finalizeRequestIfAny($reservation);
 
             return response()->json([
@@ -1704,17 +1747,16 @@ class ReservationController extends Controller
                 'data' => [
                     'reservation' => $reservation,
                     'payment' => $payment,
+                    'checked_out' => true,
                 ]
             ]);
         }
 
         // ✅ Nếu reservation đang ở checked_in → checkout bình thường
         if ($reservation->status === 'checked_in') {
-            // ✅ Truyền payment_method vào request nếu có
             if (isset($validated['payment_method'])) {
                 $request->merge(['payment_method' => $validated['payment_method']]);
             }
-
             return $this->checkOut($request, $reservation->id);
         }
 
@@ -1723,6 +1765,132 @@ class ReservationController extends Controller
             'success' => false,
             'message' => 'Reservation không ở trạng thái hợp lệ để checkout. Trạng thái hiện tại: ' . $reservation->status
         ], 422);
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/reservations/demo/check-out/confirm",
+     *     tags={"🎫 Reservations"},
+     *     summary="Xác nhận thanh toán offline sau khi quét QR checkout",
+     *     description="Nhân viên xác nhận đã nhận được tiền thanh toán offline. Chỉ áp dụng cho payment có payment_method = 'offline' và đã được quét QR.",
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"reservation_code"},
+     *             @OA\Property(property="reservation_code", type="string", example="RES-AB12CD34-20251019", description="Mã reservation code đã quét")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Xác nhận thanh toán thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string", example="Xác nhận thanh toán thành công. Checkout đã hoàn tất."),
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="object",
+     *                 @OA\Property(property="reservation", type="object"),
+     *                 @OA\Property(property="payment", type="object"),
+     *                 @OA\Property(property="checked_out", type="boolean", example=true)
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Không tìm thấy reservation hoặc payment"
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Không thể xác nhận thanh toán (đã thanh toán, không phải offline, chưa quét QR)"
+     *     )
+     *     )
+     */
+    public function confirmDemoCheckOut(Request $request)
+    {
+        $validated = $request->validate([
+            'reservation_code' => 'required|string',
+        ]);
+
+        $reservation = Reservation::where('reservation_code', $validated['reservation_code'])->first();
+
+        if (!$reservation) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy reservation với mã này'
+            ], 404);
+        }
+
+        if ($reservation->status !== 'pending_checkout') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reservation không ở trạng thái pending_checkout. Trạng thái hiện tại: ' . $reservation->status
+            ], 422);
+        }
+
+        $payment = $reservation->payment;
+        if (!$payment) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy payment cho reservation này'
+            ], 404);
+        }
+
+        $paymentMethod = is_array($payment->meta) ? ($payment->meta['payment_method'] ?? null) : null;
+
+        if ($paymentMethod !== 'offline') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chỉ có thể xác nhận thanh toán offline. Payment này không phải offline payment.'
+            ], 422);
+        }
+
+        if ($payment->status !== 'PENDING') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Payment không ở trạng thái PENDING. Trạng thái hiện tại: ' . $payment->status
+            ], 422);
+        }
+
+        // Kiểm tra đã quét QR chưa
+        $qrScanned = isset($payment->meta['qr_scanned']) && $payment->meta['qr_scanned'] === true;
+        if (!$qrScanned) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chưa quét QR checkout code. Vui lòng quét QR trước khi xác nhận.'
+            ], 422);
+        }
+
+        // Xác nhận thanh toán
+        $existingMeta = is_array($payment->meta) ? $payment->meta : [];
+        $payment->update([
+            'status' => 'PAID',
+            'paid_at' => now(),
+            'meta' => array_merge($existingMeta, [
+                'confirmed_at' => now()->toIso8601String(),
+                'confirmed_by' => 'staff',
+            ]),
+        ]);
+
+        // Finalize checkout
+        $reservation->update([
+            'status' => 'checked_out',
+        ]);
+
+        if ($reservation->slot_id !== null && $reservation->slot) {
+            $reservation->slot->update(['status' => 'available']);
+        }
+
+        $this->finalizeRequestIfAny($reservation);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Xác nhận thanh toán thành công. Checkout đã hoàn tất.',
+            'data' => [
+                'reservation' => $reservation,
+                'payment' => $payment,
+                'checked_out' => true,
+            ]
+        ]);
     }
 
     /**
@@ -1987,7 +2155,7 @@ class ReservationController extends Controller
 
             // Transform để đưa gate và parking_lot ra cùng cấp với reservation
             $data = $reservation->toArray();
-            
+
             // Tách gate ra khỏi reservation_request và đặt ở cùng cấp
             $gate = null;
             if (isset($data['reservation_request']['gate'])) {
@@ -2015,17 +2183,17 @@ class ReservationController extends Controller
                 $slotGateDistance = SlotGateDistance::where('slot_id', $data['slot']['id'])
                     ->where('gate_id', $gate['id'])
                     ->first();
-                
+
                 if ($slotGateDistance) {
                     $distanceFromGate = (float) $slotGateDistance->distance;
                 }
             }
-            
+
             // ✅ Thêm khoảng cách vào response
             if ($distanceFromGate !== null) {
                 $data['distance_from_gate_meters'] = $distanceFromGate;
             }
-            
+
             return $data;
         });
 
@@ -2140,9 +2308,9 @@ class ReservationController extends Controller
 
         // 2. Đếm số slot đã được gán cụ thể (có slot_id) và overlap thời gian
         $assignedSlotIds = Reservation::whereHas('slot', function ($q) use ($parkingLotId, $vehicleType) {
-                $q->where('parking_lot_id', $parkingLotId)
-                    ->where('vehicle_type', $vehicleType);
-            })
+            $q->where('parking_lot_id', $parkingLotId)
+                ->where('vehicle_type', $vehicleType);
+        })
             ->whereIn('status', ['confirmed', 'checked_in'])
             ->where(function ($q) use ($startTime, $endTime) {
                 // Overlap: existing.end > new.start AND existing.start < new.end
@@ -2210,7 +2378,7 @@ class ReservationController extends Controller
      *     path="/reservations/scan-checkout",
      *     tags={"🎫 Reservations"},
      *     summary="Quét QR checkout code để hoàn tất checkout",
-     *     description="Quét QR checkout code để chuyển reservation từ pending_checkout sang checked_out. Chỉ dành cho nhân viên hoặc hệ thống.",
+     *     description="Quét QR checkout code để chuyển reservation từ pending_checkout sang checked_out. Đối với thanh toán online: tự động checked_out. Đối với thanh toán offline: hiển thị số tiền và chờ nhân viên xác nhận.",
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
@@ -2220,13 +2388,26 @@ class ReservationController extends Controller
      *     ),
      *     @OA\Response(
      *         response=200,
-     *         description="Checkout thành công",
+     *         description="Quét QR thành công",
      *         @OA\JsonContent(
      *             @OA\Property(property="success", type="boolean", example=true),
-     *             @OA\Property(property="message", type="string", example="Checkout thành công"),
-     *             @OA\Property(property="data", type="object",
+     *             @OA\Property(property="message", type="string", example="Đã quét QR thành công. Vui lòng xác nhận thanh toán để hoàn tất checkout."),
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="object",
      *                 @OA\Property(property="reservation", type="object"),
-     *                 @OA\Property(property="checkout_code", type="object")
+     *                 @OA\Property(property="checkout_code", type="object"),
+     *                 @OA\Property(property="payment", type="object",
+     *                     @OA\Property(property="id", type="integer", example=123),
+     *                     @OA\Property(property="amount", type="integer", example=50000),
+     *                     @OA\Property(property="status", type="string", example="PENDING")
+     *                 ),
+     *                 @OA\Property(property="payment_method", type="string", example="offline"),
+     *                 @OA\Property(property="amount", type="integer", example=50000),
+     *                 @OA\Property(property="amount_formatted", type="string", example="50.000 VNĐ"),
+     *                 @OA\Property(property="checked_out", type="boolean", example=false),
+     *                 @OA\Property(property="requires_confirmation", type="boolean", example=true, description="Flag để frontend biết cần hiển thị nút xác nhận"),
+     *                 @OA\Property(property="confirmation_endpoint", type="string", example="/payments/123/confirm-offline")
      *             )
      *         )
      *     ),
@@ -2273,13 +2454,251 @@ class ReservationController extends Controller
             ], 422);
         }
 
-        // Finalize checkout
+        // ✅ Kiểm tra payment method để xác định online hay offline
+        $payment = $reservation->payment;
+        $paymentMethod = null;
+
+        if ($payment && is_array($payment->meta)) {
+            $paymentMethod = $payment->meta['payment_method'] ?? null;
+        }
+
+        // ✅ Xử lý theo payment method
+        if ($paymentMethod === 'online') {
+            // Online payment: Kiểm tra payment đã PAID chưa
+            if ($payment && $payment->status !== 'PAID') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Payment chưa được thanh toán thành công. Không thể finalize checkout.',
+                    'payment_status' => $payment->status
+                ], 422);
+            }
+
+            // Finalize checkout ngay cho online payment
+            $reservation->update([
+                'status' => 'checked_out',
+            ]);
+
+            // Giải phóng slot
+            $reservation->slot->update(['status' => 'available']);
+
+            // Finalize request
+            $this->finalizeRequestIfAny($reservation);
+
+            // Đánh dấu checkout code đã sử dụng
+            $checkoutCode->markAsUsed();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Checkout thành công (thanh toán online)',
+                'data' => [
+                    'reservation' => $reservation,
+                    'checkout_code' => $checkoutCode,
+                    'payment' => $payment,
+                    'payment_method' => $paymentMethod,
+                    'checked_out' => true,
+                ]
+            ]);
+        } elseif ($paymentMethod === 'offline') {
+            // Offline payment: Hiện số tiền và chờ nhân viên xác nhận
+            // Không checked_out ngay, chỉ trả về thông tin payment
+            // Lưu thông tin đã quét QR vào payment meta để biết đã quét
+            if ($payment) {
+                $existingMeta = is_array($payment->meta) ? $payment->meta : [];
+                $payment->update([
+                    'meta' => array_merge($existingMeta, [
+                        'qr_scanned_at' => now()->toIso8601String(),
+                        'qr_scanned' => true,
+                        'checkout_code_scanned' => $checkoutCode->checkout_code,
+                    ]),
+                ]);
+                $payment->refresh();
+            }
+
+            // Kiểm tra payment status
+            if (!$payment) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không tìm thấy thông tin thanh toán cho reservation này'
+                ], 422);
+            }
+
+            if ($payment->status === 'PAID') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Thanh toán đã được xác nhận trước đó',
+                    'payment_status' => $payment->status
+                ], 422);
+            }
+
+            // Load thông tin đầy đủ về reservation và vehicle
+            $reservation->load(['slot.parkingLot', 'reservationRequest.gate']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đã quét QR thành công. Vui lòng xác nhận thanh toán để hoàn tất checkout.',
+                'data' => [
+                    'reservation' => [
+                        'id' => $reservation->id,
+                        'reservation_code' => $reservation->reservation_code,
+                        'status' => $reservation->status,
+                        'check_in_at' => $reservation->check_in_at?->toIso8601String(),
+                        'check_out_at' => $reservation->check_out_at?->toIso8601String(),
+                        'vehicle_snapshot' => $reservation->vehicle_snapshot,
+                        'user_snapshot' => $reservation->user_snapshot,
+                    ],
+                    'checkout_code' => [
+                        'checkout_code' => $checkoutCode->checkout_code,
+                        'status' => $checkoutCode->status,
+                        'expires_at' => $checkoutCode->expires_at?->toIso8601String(),
+                    ],
+                    'payment' => [
+                        'id' => $payment->id,
+                        'order_id' => $payment->order_id,
+                        'amount' => $payment->amount,
+                        'status' => $payment->status,
+                        'txn_ref' => $payment->txn_ref,
+                        'created_at' => $payment->created_at?->toIso8601String(),
+                    ],
+                    'payment_method' => $paymentMethod,
+                    'amount' => $payment->amount,
+                    'amount_formatted' => number_format($payment->amount, 0, ',', '.') . ' VNĐ',
+                    'payment_status' => $payment->status,
+                    'checked_out' => false,
+                    'requires_confirmation' => true, // Flag để frontend biết cần hiển thị nút xác nhận
+                    'confirmation_endpoint' => "/payments/{$payment->id}/confirm-offline", // Endpoint để xác nhận
+                ]
+            ]);
+        } else {
+            // Payment method không xác định
+            return response()->json([
+                'success' => false,
+                'message' => 'Không xác định được phương thức thanh toán',
+                'payment_method' => $paymentMethod
+            ], 422);
+        }
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/reservations/scan-checkout/confirm",
+     *     tags={"🎫 Reservations"},
+     *     summary="Xác nhận thanh toán offline sau khi quét QR checkout",
+     *     description="Nhân viên xác nhận đã nhận được tiền thanh toán offline. Chỉ áp dụng cho payment có payment_method = 'offline' và đã được quét QR.",
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"checkout_code"},
+     *             @OA\Property(property="checkout_code", type="string", example="CHK-ABC12345-20251110", description="Mã checkout code đã quét")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Xác nhận thanh toán thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string", example="Xác nhận thanh toán thành công. Checkout đã hoàn tất."),
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="object",
+     *                 @OA\Property(property="reservation", type="object"),
+     *                 @OA\Property(property="payment", type="object"),
+     *                 @OA\Property(property="checked_out", type="boolean", example=true)
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Không tìm thấy checkout code hoặc payment"
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Không thể xác nhận thanh toán (đã thanh toán, không phải offline, chưa quét QR)"
+     *     )
+     *     )
+     */
+    public function confirmOfflinePaymentFromCheckout(Request $request)
+    {
+        $validated = $request->validate([
+            'checkout_code' => 'required|string',
+        ]);
+
+        $checkoutCode = CheckoutCode::where('checkout_code', $validated['checkout_code'])->first();
+
+        if (!$checkoutCode) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy mã checkout'
+            ], 404);
+        }
+
+        $reservation = $checkoutCode->reservation;
+        $payment = $reservation->payment;
+
+        if (!$payment) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy thông tin thanh toán cho reservation này'
+            ], 404);
+        }
+
+        // Kiểm tra payment method phải là offline
+        $paymentMethod = is_array($payment->meta) ? ($payment->meta['payment_method'] ?? null) : null;
+        if ($paymentMethod !== 'offline') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chỉ có thể xác nhận thanh toán trực tiếp (offline). Payment này không phải offline payment.'
+            ], 422);
+        }
+
+        // Kiểm tra payment đã được quét QR chưa
+        $qrScanned = isset($payment->meta['qr_scanned']) && $payment->meta['qr_scanned'] === true;
+        if (!$qrScanned) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chưa quét QR checkout code. Vui lòng quét QR trước khi xác nhận thanh toán.'
+            ], 422);
+        }
+
+        // Kiểm tra payment status phải là PENDING
+        if ($payment->status !== 'PENDING') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chỉ có thể xác nhận thanh toán với status PENDING. Payment hiện tại có status: ' . $payment->status
+            ], 422);
+        }
+
+        // Kiểm tra reservation status phải là pending_checkout
+        if ($reservation->status !== 'pending_checkout') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reservation không ở trạng thái pending_checkout. Trạng thái hiện tại: ' . $reservation->status
+            ], 422);
+        }
+
+        // Xác nhận thanh toán: cập nhật payment status thành PAID
+        $payment->update([
+            'status' => 'PAID',
+            'paid_at' => now(),
+        ]);
+
+        // Cập nhật meta với thông tin xác nhận
+        $existingMeta = is_array($payment->meta) ? $payment->meta : [];
+        $payment->update([
+            'meta' => array_merge($existingMeta, [
+                'confirmed_at' => now()->toIso8601String(),
+                'confirmed_by' => 'staff', // Có thể lấy từ auth user sau này
+            ]),
+        ]);
+
+        // Finalize checkout: chuyển reservation sang checked_out
         $reservation->update([
             'status' => 'checked_out',
         ]);
 
         // Giải phóng slot
-        $reservation->slot->update(['status' => 'available']);
+        if ($reservation->slot_id !== null && $reservation->slot) {
+            $reservation->slot->update(['status' => 'available']);
+        }
 
         // Finalize request
         $this->finalizeRequestIfAny($reservation);
@@ -2287,12 +2706,18 @@ class ReservationController extends Controller
         // Đánh dấu checkout code đã sử dụng
         $checkoutCode->markAsUsed();
 
+        // Reload để lấy dữ liệu mới nhất
+        $reservation->refresh();
+        $payment->refresh();
+
         return response()->json([
             'success' => true,
-            'message' => 'Checkout thành công',
+            'message' => 'Xác nhận thanh toán thành công. Checkout đã hoàn tất.',
             'data' => [
                 'reservation' => $reservation,
+                'payment' => $payment,
                 'checkout_code' => $checkoutCode,
+                'checked_out' => true,
             ]
         ]);
     }
