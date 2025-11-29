@@ -1181,9 +1181,10 @@ class ReservationController extends Controller
             $reservation->slot->update(['status' => 'available']);
             $this->finalizeRequestIfAny($reservation);
         } elseif ($paymentMethod === 'offline') {
-            // Thanh toán trực tiếp → pending_checkout (đã thanh toán trực tiếp, chờ nhân viên quét)
-            $newStatus = 'pending_checkout';
-            // Không giải phóng slot ngay, chờ nhân viên quét để finalize
+            // ✅ Thanh toán trực tiếp → pending_payment (chưa thanh toán, chờ thanh toán trực tiếp)
+            // pending_checkout chỉ được set khi đã thanh toán offline và quét QR checkout
+            $newStatus = 'pending_payment';
+            // Không giải phóng slot ngay, chờ thanh toán và quét QR để finalize
         } else {
             // Thanh toán online → pending_payment (chưa thanh toán)
             $newStatus = 'pending_payment';
@@ -1614,7 +1615,7 @@ class ReservationController extends Controller
      *     path="/reservations/demo/check-out",
      *     tags={"🎫 Reservations"},
      *     summary="Demo check-out bằng reservation_code",
-     *     description="Check-out bằng reservation_code. Xử lý 2 trường hợp: checked_in (tạo payment) và pending_checkout (finalize checkout). Đối với offline payment ở pending_checkout, hiển thị số tiền và chờ xác nhận.",
+     *     description="Check-out bằng reservation_code thay vì ID, dễ demo hơn. Chỉ áp dụng khi reservation đang checked_in.",
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
@@ -1625,19 +1626,19 @@ class ReservationController extends Controller
      *     ),
      *     @OA\Response(
      *         response=200,
-     *         description="Check-out thành công hoặc yêu cầu xác nhận thanh toán",
+     *         description="Check-out thành công",
      *         @OA\JsonContent(
      *             @OA\Property(property="success", type="boolean", example=true),
-     *             @OA\Property(property="message", type="string", example="Đã quét QR thành công. Vui lòng xác nhận thanh toán để hoàn tất checkout."),
+     *             @OA\Property(property="message", type="string", example="Check-out thành công"),
      *             @OA\Property(property="data", type="object",
-     *                 @OA\Property(property="reservation", type="object"),
+     *                 @OA\Property(property="reservation", type="object",
+     *                     @OA\Property(property="id", type="integer", example=101),
+     *                     @OA\Property(property="status", type="string", example="pending_checkout"),
+     *                     @OA\Property(property="check_out_at", type="string", format="date-time", example="2025-10-19T17:45:00Z")
+     *                 ),
      *                 @OA\Property(property="payment", type="object"),
      *                 @OA\Property(property="amount", type="integer", example=50000),
-     *                 @OA\Property(property="amount_formatted", type="string", example="50.000 VNĐ"),
-     *                 @OA\Property(property="payment_method", type="string", example="offline"),
-     *                 @OA\Property(property="checked_out", type="boolean", example=false),
-     *                 @OA\Property(property="requires_confirmation", type="boolean", example=true, description="Flag để frontend biết cần hiển thị nút xác nhận"),
-     *                 @OA\Property(property="confirmation_endpoint", type="string", example="/reservations/demo/check-out/confirm")
+     *                 @OA\Property(property="payment_method", type="string", example="online")
      *             )
      *         )
      *     ),
@@ -1649,7 +1650,7 @@ class ReservationController extends Controller
     {
         $validated = $request->validate([
             'reservation_code' => 'required|string',
-            'payment_method' => 'nullable|string|in:online,offline'
+            'payment_method' => 'nullable|string|in:online,offline' // payment_method
         ]);
 
         $reservation = Reservation::where('reservation_code', $validated['reservation_code'])->first();
@@ -1661,8 +1662,8 @@ class ReservationController extends Controller
             ], 404);
         }
 
-        // ✅ pending_checkout → xử lý theo payment method
-        if ($reservation->status === 'pending_checkout') {
+        // ✅ pending_payment → xử lý theo payment method (offline hoặc online chưa thanh toán)
+        if ($reservation->status === 'pending_payment') {
             $payment = $reservation->payment;
 
             if (!$payment) {
@@ -1752,11 +1753,61 @@ class ReservationController extends Controller
             ]);
         }
 
+        // ✅ pending_checkout → finalize checkout (đã thanh toán, chờ finalize)
+        if ($reservation->status === 'pending_checkout') {
+            // Kiểm tra payment đã PAID chưa (cho online payment)
+            $payment = $reservation->payment;
+            if ($payment) {
+                $paymentMethod = is_array($payment->meta) ? ($payment->meta['payment_method'] ?? null) : null;
+
+                // Nếu là offline payment và chưa PAID → cập nhật thành PAID
+                if ($paymentMethod === 'offline' && $payment->status !== 'PAID') {
+                    $payment->update([
+                        'status' => 'PAID',
+                        'paid_at' => now()
+                    ]);
+                }
+
+                // Kiểm tra online payment phải đã PAID
+                if ($paymentMethod === 'online' && $payment->status !== 'PAID') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Payment chưa được thanh toán thành công. Không thể finalize checkout.'
+                    ], 422);
+                }
+            }
+
+            // Finalize checkout: pending_checkout → checked_out
+            $reservation->update([
+                'status' => 'checked_out',
+            ]);
+
+            // ✅ Giải phóng slot (chỉ khi có slot)
+            if ($reservation->slot_id !== null && $reservation->slot) {
+                $reservation->slot->update(['status' => 'available']);
+            }
+
+            // Finalize request
+            $this->finalizeRequestIfAny($reservation);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Checkout hoàn tất thành công',
+                'data' => [
+                    'reservation' => $reservation,
+                    'payment' => $payment,
+                    'checked_out' => true,
+                ]
+            ]);
+        }
+
         // ✅ Nếu reservation đang ở checked_in → checkout bình thường
         if ($reservation->status === 'checked_in') {
+            // ✅ Truyền payment_method vào request nếu có
             if (isset($validated['payment_method'])) {
                 $request->merge(['payment_method' => $validated['payment_method']]);
             }
+
             return $this->checkOut($request, $reservation->id);
         }
 
@@ -1820,10 +1871,11 @@ class ReservationController extends Controller
             ], 404);
         }
 
-        if ($reservation->status !== 'pending_checkout') {
+        // ✅ Kiểm tra status phải là pending_payment (offline payment chưa thanh toán)
+        if ($reservation->status !== 'pending_payment') {
             return response()->json([
                 'success' => false,
-                'message' => 'Reservation không ở trạng thái pending_checkout. Trạng thái hiện tại: ' . $reservation->status
+                'message' => 'Reservation không ở trạng thái pending_payment. Trạng thái hiện tại: ' . $reservation->status
             ], 422);
         }
 
@@ -1871,7 +1923,7 @@ class ReservationController extends Controller
             ]),
         ]);
 
-        // Finalize checkout
+        // Finalize checkout: pending_payment → checked_out
         $reservation->update([
             'status' => 'checked_out',
         ]);
@@ -1881,6 +1933,10 @@ class ReservationController extends Controller
         }
 
         $this->finalizeRequestIfAny($reservation);
+
+        // Reload để lấy dữ liệu mới nhất
+        $reservation->refresh();
+        $payment->refresh();
 
         return response()->json([
             'success' => true,
