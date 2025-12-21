@@ -3,9 +3,16 @@ services:
   # Composer cho svc-auth
   # -------------------------
   auth-composer:
-    image: composer:2
+    image: php:8.2-cli
     working_dir: /app
-    command: ["composer", "install", "--no-interaction", "--prefer-dist"]
+    command: >
+      sh -c "apt-get update \
+      && apt-get install -y git unzip zip libzip-dev \
+      && docker-php-ext-install zip || true \
+      && php -r \"copy('https://getcomposer.org/installer','/tmp/composer-setup.php');\" \
+      && php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer \
+      && composer install --no-interaction --prefer-dist \
+      || (echo 'composer failed' && exit 1)"
     volumes:
       - ./services/svc-auth:/app
       - vendor_auth:/app/vendor
@@ -110,9 +117,16 @@ services:
   # Composer cho svc-payment
   # -------------------------
   payment-composer:
-    image: composer:2
+    image: php:8.2-cli
     working_dir: /app
-    command: ["composer", "install", "--no-interaction", "--prefer-dist"]
+    command: >
+      sh -c "apt-get update \
+      && apt-get install -y git unzip zip libzip-dev \
+      && docker-php-ext-install zip || true \
+      && php -r \"copy('https://getcomposer.org/installer','/tmp/composer-setup.php');\" \
+      && php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer \
+      && composer install --no-interaction --prefer-dist \
+      || (echo 'composer failed' && exit 1)"
     volumes:
       - ./services/svc-payment:/app
       - vendor_payment:/app/vendor
@@ -206,105 +220,7 @@ services:
       start_period: 30s
     restart: unless-stopped
     networks: [backend]
-  # -------------------------
-  # Composer cho svc-reservation
-  # -------------------------
-  reservation-composer:
-    image: composer:2
-    working_dir: /app
-    command: ["composer", "install", "--no-interaction", "--prefer-dist"]
-    volumes:
-      - ./services/svc-reservation:/app
-      - vendor_reservation:/app/vendor
-      - composer-cache:/tmp/cache
-    environment:
-      COMPOSER_CACHE_DIR: /tmp/cache
-    restart: "no"
-    networks: ["backend"]
 
-  # -------------------------
-  # PHP-FPM (svc-reservation)
-  # -------------------------
-  reservation-app:
-    build: ./services/svc-reservation
-    container_name: reservation-app
-    env_file: ./services/svc-reservation/.env
-    working_dir: /var/www/html
-    volumes:
-      - ./services/svc-reservation:/var/www/html:rw
-      - vendor_reservation:/var/www/html/vendor
-      - storage_reservation:/var/www/html/storage
-      - cache_reservation:/var/www/html/bootstrap/cache
-    expose: ["9000"]
-    depends_on:
-      reservation-composer:
-        condition: service_completed_successfully
-      reservation-db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    healthcheck:
-      test: >
-        [ -f vendor/autoload.php ] &&
-        php-fpm -tt >/dev/null 2>&1 &&
-        php -r 'exit(!@fsockopen("127.0.0.1",9000));'
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    restart: unless-stopped
-    networks: ["backend"]
-
-  # -------------------------
-  # Nginx (svc-reservation)
-  # -------------------------
-  reservation-nginx:
-    image: nginx:stable
-    container_name: reservation-nginx
-    volumes:
-      - ./services/svc-reservation:/var/www/html:ro
-      - ./services/svc-reservation/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-    ports:
-      - "8003:80"
-    depends_on:
-      reservation-app:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "nginx -t && (echo > /dev/tcp/127.0.0.1/80) >/dev/null 2>&1 || exit 1",
-        ]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped
-    networks: [backend]
-
-  # -------------------------
-  # MySQL (svc-reservation)
-  # -------------------------
-  reservation-db:
-    image: mysql:8
-    container_name: reservation-db
-    environment:
-      MYSQL_DATABASE: reservation_db
-      MYSQL_USER: reservation
-      MYSQL_PASSWORD: reservation
-      MYSQL_ROOT_PASSWORD: root
-    ports:
-      - "33063:3306"
-    volumes:
-      - reservation-dbdata:/var/lib/mysql
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -proot || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 30s
-    restart: unless-stopped
-    networks: [backend]
   # -------------------------
   # Redis
   # -------------------------
@@ -331,11 +247,6 @@ volumes:
   vendor_payment:
   storage_payment:
   cache_payment:
-
-  reservation-dbdata:
-  vendor_reservation:
-  storage_reservation:
-  cache_reservation:
 
 # -------------------------
 # Network
